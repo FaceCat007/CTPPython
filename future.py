@@ -1179,6 +1179,8 @@ facecat.m_mouseEnterCallBack = onViewMouseEnter
 facecat.m_mouseLeaveCallBack = onViewMouseLeave
 facecat.m_clickCallBack = onViewClick
 facecat.m_clickGridCellCallBack = onClickGridCell
+
+#消息循环
 def WndProc(hwnd,msg,wParam,lParam):
 	if msg == WM_DESTROY:
 		os._exit(0)
@@ -1231,7 +1233,8 @@ def WndProc(hwnd,msg,wParam,lParam):
 			updateView(m_paint.m_views)
 			invalidate(m_paint)
 	return win32gui.DefWindowProc(hwnd,msg,wParam,lParam)
-
+	
+#创建窗体
 wc = win32gui.WNDCLASS()
 wc.hbrBackground = COLOR_BTNFACE + 1
 wc.hCursor = win32gui.LoadCursor(0,IDI_APPLICATION)
@@ -1241,6 +1244,7 @@ reg = win32gui.RegisterClass(wc)
 hwnd = win32gui.CreateWindow(reg,'facecat-py',WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,0,0,0,None)
 m_paint.m_hWnd = hwnd
 
+#读取XML
 root  = ET.fromstring(m_xml)
 for child in root:
 	if(child.tag == "{facecat}body"):
