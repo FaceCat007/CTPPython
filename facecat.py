@@ -10,6 +10,8 @@ from win32con import *
 import math
 import time
 from operator import attrgetter
+from ctypes import *
+import os
 
 #坐标结构
 class FCPoint(object):
@@ -57,6 +59,7 @@ def toColor(strColor):
 		return int(float(strColor))
 	return 0
 
+#绘图API
 class FCPaint(object):
 	def __init__(self):
 		self.m_moveTo = FALSE
@@ -79,17 +82,25 @@ class FCPaint(object):
 		self.m_hOldFont = None #旧的字体
 		self.m_textSize = 19 #当前的字体大小
 		self.m_systemFont = "Segoe UI" #系统字体
+		self.m_gdiPlusPaint = None #GDI
 	#开始绘图 
 	#rect:区域
-	def beginPaint(self, rect):
-		self.m_drawHDC = win32gui.CreateCompatibleDC(self.m_hdc)
-		win32gui.SetBkMode(self.m_drawHDC, TRANSPARENT)
-		win32gui.SetGraphicsMode(self.m_drawHDC, GM_ADVANCED)
-		self.m_memBM = win32gui.CreateCompatibleBitmap(self.m_hdc, int(rect.right - rect.left),  int(rect.bottom - rect.top))
-		win32gui.SelectObject(self.m_drawHDC, self.m_memBM)
-		self.m_moveTo = FALSE;
-		self.m_innerHDC = self.m_drawHDC
-		self.m_innerBM = self.m_memBM
+	def beginPaint(self, rect, pRect):
+		if(self.m_gdiPlusPaint == None):
+			self.m_gdiPlusPaint = GdiPlusPaint()
+			self.m_gdiPlusPaint.init()
+			self.m_gdiPlusPaint.createGdiPlus()
+		if(self.m_gdiPlusPaint != None):
+			self.m_gdiPlusPaint.beginPaint(self.m_hdc, int(rect.left), int(rect.top), int(rect.right), int(rect.bottom), int(pRect.left), int(pRect.top), int(pRect.right), int(pRect.bottom))
+		else:
+			self.m_drawHDC = win32gui.CreateCompatibleDC(self.m_hdc)
+			win32gui.SetBkMode(self.m_drawHDC, TRANSPARENT)
+			win32gui.SetGraphicsMode(self.m_drawHDC, GM_ADVANCED)
+			self.m_memBM = win32gui.CreateCompatibleBitmap(self.m_hdc, int(rect.right - rect.left),  int(rect.bottom - rect.top))
+			win32gui.SelectObject(self.m_drawHDC, self.m_memBM)
+			self.m_moveTo = FALSE;
+			self.m_innerHDC = self.m_drawHDC
+			self.m_innerBM = self.m_memBM
 		self.m_offsetX = 0
 		self.m_offsetY = 0
 	#绘制线
@@ -104,12 +115,15 @@ class FCPaint(object):
 		wd = min(self.m_scaleFactorX, self.m_scaleFactorY) * width
 		if(wd < 1):
 			wd = 1
-		hPen = win32gui.CreatePen(PS_SOLID, int(wd), toColor(color)) 
-		hOldPen = win32gui.SelectObject(self.m_innerHDC, hPen)
-		win32gui.MoveToEx(self.m_innerHDC, int((x1 + self.m_offsetX) * self.m_scaleFactorX), int((y1 + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.LineTo(self.m_innerHDC, int((x2 + self.m_offsetX) * self.m_scaleFactorX), int((y2 + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.SelectObject(self.m_innerHDC, hOldPen)
-		win32gui.DeleteObject(hPen)
+		if(self.m_gdiPlusPaint != None):
+			self.m_gdiPlusPaint.drawLine(toColor(color), int(wd), 0, int(x1), int(y1), int(x2), int(y2))
+		else:
+			hPen = win32gui.CreatePen(PS_SOLID, int(wd), toColor(color)) 
+			hOldPen = win32gui.SelectObject(self.m_innerHDC, hPen)
+			win32gui.MoveToEx(self.m_innerHDC, int((x1 + self.m_offsetX) * self.m_scaleFactorX), int((y1 + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.LineTo(self.m_innerHDC, int((x2 + self.m_offsetX) * self.m_scaleFactorX), int((y2 + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.SelectObject(self.m_innerHDC, hOldPen)
+			win32gui.DeleteObject(hPen)
 	#绘制连续线
 	#color:颜色 
 	#width:宽度 
@@ -123,19 +137,28 @@ class FCPaint(object):
 			wd = min(self.m_scaleFactorX, self.m_scaleFactorY) * width
 			if(wd < 1):
 				wd = 1
-			hPen = win32gui.CreatePen(PS_SOLID, int(wd), toColor(color)) 
-			hOldPen = win32gui.SelectObject(self.m_innerHDC, hPen)
-			for i in range(0,len(apt)):
-				x,y = apt[i]
-				x = x + self.m_offsetX
-				y = y + self.m_offsetY
-				if (self.m_scaleFactorX != 1 or self.m_scaleFactorY != 1):
-					x = m_scaleFactorX * x;
-					y = m_scaleFactorY * y;
-				apt[i] = (int(x), int(y))
-			win32gui.Polyline(self.m_innerHDC, apt)
-			win32gui.SelectObject(self.m_innerHDC, hOldPen)
-			win32gui.DeleteObject(hPen)
+			if(self.m_gdiPlusPaint != None):
+				strApt = ""
+				for i in range(0,len(apt)):
+					x,y = apt[i]
+					strApt += str(x) + "," + str(y)
+					if(i != len(apt) - 1):
+						strApt += " "
+				self.m_gdiPlusPaint.drawPolyline(toColor(color), int(wd), 0, strApt)
+			else:
+				hPen = win32gui.CreatePen(PS_SOLID, int(wd), toColor(color)) 
+				hOldPen = win32gui.SelectObject(self.m_innerHDC, hPen)
+				for i in range(0,len(apt)):
+					x,y = apt[i]
+					x = x + self.m_offsetX
+					y = y + self.m_offsetY
+					if (self.m_scaleFactorX != 1 or self.m_scaleFactorY != 1):
+						x = m_scaleFactorX * x;
+						y = m_scaleFactorY * y;
+					apt[i] = (int(x), int(y))
+				win32gui.Polyline(self.m_innerHDC, apt)
+				win32gui.SelectObject(self.m_innerHDC, hOldPen)
+				win32gui.DeleteObject(hPen)
 	#绘制多边形
 	#color:颜色 
 	#width:宽度 
@@ -149,24 +172,33 @@ class FCPaint(object):
 			wd = min(self.m_scaleFactorX, self.m_scaleFactorY) * width
 			if(wd < 1):
 				wd = 1
-			hPen = win32gui.CreatePen(PS_SOLID, int(wd), toColor(color)) 
-			hOldPen = win32gui.SelectObject(self.m_innerHDC, hPen)
-			for i in range(0,len(apt)):
-				x,y = apt[i]
-				x = x + self.m_offsetX
-				y = y + self.m_offsetY
-				if (self.m_scaleFactorX != 1 or self.m_scaleFactorY != 1):
-					x = m_scaleFactorX * x;
-					y = m_scaleFactorY * y;
-				if(i == 0):
-					win32gui.MoveToEx(self.m_innerHDC, int(x), int(y))
-				else:
-					win32gui.LineTo(self.m_innerHDC, int(x), int(y))
-				if(i == len(apt) - 1):
-					fx,fy = apt[0]
-					win32gui.LineTo(self.m_innerHDC, int(fx), int(fy))
-			win32gui.SelectObject(self.m_innerHDC, hOldPen)
-			win32gui.DeleteObject(hPen)
+			if(self.m_gdiPlusPaint != None):
+				strApt = ""
+				for i in range(0,len(apt)):
+					x,y = apt[i]
+					strApt += str(x) + "," + str(y)
+					if(i != len(apt) - 1):
+						strApt += " "
+				self.m_gdiPlusPaint.drawPolygon(toColor(color), int(wd), 0, strApt)
+			else:
+				hPen = win32gui.CreatePen(PS_SOLID, int(wd), toColor(color)) 
+				hOldPen = win32gui.SelectObject(self.m_innerHDC, hPen)
+				for i in range(0,len(apt)):
+					x,y = apt[i]
+					x = x + self.m_offsetX
+					y = y + self.m_offsetY
+					if (self.m_scaleFactorX != 1 or self.m_scaleFactorY != 1):
+						x = m_scaleFactorX * x;
+						y = m_scaleFactorY * y;
+					if(i == 0):
+						win32gui.MoveToEx(self.m_innerHDC, int(x), int(y))
+					else:
+						win32gui.LineTo(self.m_innerHDC, int(x), int(y))
+					if(i == len(apt) - 1):
+						fx,fy = apt[0]
+						win32gui.LineTo(self.m_innerHDC, int(fx), int(fy))
+				win32gui.SelectObject(self.m_innerHDC, hOldPen)
+				win32gui.DeleteObject(hPen)
 	#绘制矩形 
 	#color:颜色 
 	#width:宽度 
@@ -179,16 +211,19 @@ class FCPaint(object):
 		wd = min(self.m_scaleFactorX, self.m_scaleFactorY) * width
 		if(wd < 1):
 			wd = 1
-		hPen = win32gui.CreatePen(PS_SOLID, int(wd), toColor(color)) 
-		hOldPen = win32gui.SelectObject(self.m_innerHDC, hPen)
-		win32gui.MoveToEx(self.m_innerHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.LineTo(self.m_innerHDC, int((right + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.LineTo(self.m_innerHDC, int((right + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.LineTo(self.m_innerHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.LineTo(self.m_innerHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY))
-		#win32gui.Rect(self.m_drawHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.SelectObject(self.m_innerHDC, hOldPen)
-		win32gui.DeleteObject(hPen)
+		if(self.m_gdiPlusPaint != None):
+			self.m_gdiPlusPaint.drawRect(toColor(color), int(wd), 0, int(left), int(top), int(right), int(bottom))
+		else:
+			hPen = win32gui.CreatePen(PS_SOLID, int(wd), toColor(color)) 
+			hOldPen = win32gui.SelectObject(self.m_innerHDC, hPen)
+			win32gui.MoveToEx(self.m_innerHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.LineTo(self.m_innerHDC, int((right + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.LineTo(self.m_innerHDC, int((right + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.LineTo(self.m_innerHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.LineTo(self.m_innerHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY))
+			#win32gui.Rect(self.m_drawHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.SelectObject(self.m_innerHDC, hOldPen)
+			win32gui.DeleteObject(hPen)
 	#绘制椭圆 
 	#color:颜色 
 	#width:宽度 
@@ -201,23 +236,26 @@ class FCPaint(object):
 		wd = min(self.m_scaleFactorX, self.m_scaleFactorY) * width
 		if(wd < 1):
 			wd = 1
-		hPen = win32gui.CreatePen(PS_SOLID, int(wd), toColor(color)) 
-		hOldPen = win32gui.SelectObject(self.m_innerHDC, hPen)
-		xLeft = int((left + self.m_offsetX) * self.m_scaleFactorX)
-		yTop = int((top + self.m_offsetY) * self.m_scaleFactorY)
-		xRight = int((right + self.m_offsetX) * self.m_scaleFactorX)
-		yBottom = int((bottom + self.m_offsetY) * self.m_scaleFactorY)
-		xStart = xLeft
-		yStart = int(yTop + (yBottom - yTop) / 2)
-		xEnd = xLeft
-		yEnd = yStart
-		if(xLeft == xRight or yTop == yBottom):
-			win32gui.MoveToEx(self.m_innerHDC, int((xLeft + self.m_offsetX) * self.m_scaleFactorX), int((yTop + self.m_offsetY) * self.m_scaleFactorY))
-			win32gui.LineTo(self.m_innerHDC, int((xRight + self.m_offsetX) * self.m_scaleFactorX), int((yBottom + self.m_offsetY) * self.m_scaleFactorY))
+		if(self.m_gdiPlusPaint != None):
+			self.m_gdiPlusPaint.drawEllipse(toColor(color), int(wd), 0, int(left), int(top), int(right), int(bottom))
 		else:
-			win32gui.Arc(self.m_innerHDC, xLeft, yTop, xRight, yBottom, xStart, yStart, xEnd, yEnd)
-		win32gui.SelectObject(self.m_innerHDC, hOldPen)
-		win32gui.DeleteObject(hPen)
+			hPen = win32gui.CreatePen(PS_SOLID, int(wd), toColor(color)) 
+			hOldPen = win32gui.SelectObject(self.m_innerHDC, hPen)
+			xLeft = int((left + self.m_offsetX) * self.m_scaleFactorX)
+			yTop = int((top + self.m_offsetY) * self.m_scaleFactorY)
+			xRight = int((right + self.m_offsetX) * self.m_scaleFactorX)
+			yBottom = int((bottom + self.m_offsetY) * self.m_scaleFactorY)
+			xStart = xLeft
+			yStart = int(yTop + (yBottom - yTop) / 2)
+			xEnd = xLeft
+			yEnd = yStart
+			if(xLeft == xRight or yTop == yBottom):
+				win32gui.MoveToEx(self.m_innerHDC, int((xLeft + self.m_offsetX) * self.m_scaleFactorX), int((yTop + self.m_offsetY) * self.m_scaleFactorY))
+				win32gui.LineTo(self.m_innerHDC, int((xRight + self.m_offsetX) * self.m_scaleFactorX), int((yBottom + self.m_offsetY) * self.m_scaleFactorY))
+			else:
+				win32gui.Arc(self.m_innerHDC, xLeft, yTop, xRight, yBottom, xStart, yStart, xEnd, yEnd)
+			win32gui.SelectObject(self.m_innerHDC, hOldPen)
+			win32gui.DeleteObject(hPen)
 	#绘制文字大小 
 	#text:文字 
 	#color:颜色 
@@ -225,35 +263,42 @@ class FCPaint(object):
 	#x:横坐标 
 	#y:纵坐标
 	def drawText(self, text, color, font, x, y):
-		fontSize = float(font.split(" ")[0].replace("px", "")) + 7
-		if(fontSize != self.m_textSize):
-			if(self.m_hOldFont != None):
-				win32gui.SelectObject(self.m_innerHDC, self.m_hOldFont);
-				self.m_hOldFont = None
-			lf = win32gui.LOGFONT()
-			lf.lfFaceName = self.m_systemFont
-			self.m_textSize = fontSize
-			lf.lfHeight = self.m_textSize
-			#lf.lfWeight = 700
-			self.m_hFont = win32gui.CreateFontIndirect(lf)
-			self.m_hOldFont = win32gui.SelectObject(self.m_innerHDC, self.m_hFont);
-			win32gui.SelectObject(self.m_innerHDC, self.m_hFont)
-		win32gui.SetTextColor(self.m_innerHDC, toColor(color))
-		textSize = self.textSize(text,font)
-		pyRect = (int((x + self.m_offsetX) * self.m_scaleFactorX), int((y + self.m_offsetY) * self.m_scaleFactorY), int((x + textSize.cx + self.m_offsetX) * self.m_scaleFactorX), int((y + textSize.cy + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.DrawText(self.m_innerHDC, text, len(text), pyRect, DT_NOPREFIX|DT_WORD_ELLIPSIS|0)
+		if(self.m_gdiPlusPaint != None):
+			newFont = font.split(" ")[1] + "," + font.split(" ")[0].replace("px", "")
+			self.m_gdiPlusPaint.drawTextWithPos(text, toColor(color), newFont, int(x), int(y))
+		else:
+			fontSize = float(font.split(" ")[0].replace("px", "")) + 7
+			if(fontSize != self.m_textSize):
+				if(self.m_hOldFont != None):
+					win32gui.SelectObject(self.m_innerHDC, self.m_hOldFont);
+					self.m_hOldFont = None
+				lf = win32gui.LOGFONT()
+				lf.lfFaceName = self.m_systemFont
+				self.m_textSize = fontSize
+				lf.lfHeight = self.m_textSize
+				#lf.lfWeight = 700
+				self.m_hFont = win32gui.CreateFontIndirect(lf)
+				self.m_hOldFont = win32gui.SelectObject(self.m_innerHDC, self.m_hFont);
+				win32gui.SelectObject(self.m_innerHDC, self.m_hFont)
+			win32gui.SetTextColor(self.m_innerHDC, toColor(color))
+			textSize = self.textSize(text,font)
+			pyRect = (int((x + self.m_offsetX) * self.m_scaleFactorX), int((y + self.m_offsetY) * self.m_scaleFactorY), int((x + textSize.cx + self.m_offsetX) * self.m_scaleFactorX), int((y + textSize.cy + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.DrawText(self.m_innerHDC, text, len(text), pyRect, DT_NOPREFIX|DT_WORD_ELLIPSIS|0)
 	#结束绘图
 	def endPaint(self):
-		if(self.m_clipRect != None):
-			win32gui.BitBlt(self.m_hdc, int(self.m_clipRect.left), int(self.m_clipRect.top), int(self.m_clipRect.right - self.m_clipRect.left), int(self.m_clipRect.bottom - self.m_clipRect.top), self.m_drawHDC, int(self.m_clipRect.left), int(self.m_clipRect.top), SRCCOPY)
+		if(self.m_gdiPlusPaint != None):
+			self.m_gdiPlusPaint.endPaint()
 		else:
-			win32gui.BitBlt(self.m_hdc, 0, 0, self.m_size.cx, self.m_size.cy, self.m_drawHDC, 0, 0, SRCCOPY)
-		if(self.m_drawHDC != None):
-			win32gui.DeleteDC(self.m_drawHDC)
-			self.m_drawHDC = None
-		if(self.m_memBM != None):
-			win32gui.DeleteObject(self.m_memBM)
-			self.m_memBM = None
+			if(self.m_clipRect != None):
+				win32gui.BitBlt(self.m_hdc, int(self.m_clipRect.left), int(self.m_clipRect.top), int(self.m_clipRect.right - self.m_clipRect.left), int(self.m_clipRect.bottom - self.m_clipRect.top), self.m_drawHDC, int(self.m_clipRect.left), int(self.m_clipRect.top), SRCCOPY)
+			else:
+				win32gui.BitBlt(self.m_hdc, 0, 0, self.m_size.cx, self.m_size.cy, self.m_drawHDC, 0, 0, SRCCOPY)
+			if(self.m_drawHDC != None):
+				win32gui.DeleteDC(self.m_drawHDC)
+				self.m_drawHDC = None
+			if(self.m_memBM != None):
+				win32gui.DeleteObject(self.m_memBM)
+				self.m_memBM = None
 	#填充矩形 
 	#color:颜色
 	#left:左侧坐标 
@@ -261,11 +306,14 @@ class FCPaint(object):
 	#right:右侧坐标 
 	#bottom:下方坐标
 	def fillRect(self, color, left, top, right, bottom):
-		brush = win32gui.CreateSolidBrush(toColor(color))
-		win32gui.SelectObject(self.m_innerHDC, brush)
-		pyRect = (int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + self.m_offsetX + 1) * self.m_scaleFactorX), int((bottom + self.m_offsetY + 1) * self.m_scaleFactorY))
-		win32gui.FillRect(self.m_innerHDC, pyRect, brush)
-		win32gui.DeleteObject(brush)
+		if(self.m_gdiPlusPaint != None):
+			self.m_gdiPlusPaint.fillRect(toColor(color), int(left), int(top), int(right), int(bottom))
+		else:
+			brush = win32gui.CreateSolidBrush(toColor(color))
+			win32gui.SelectObject(self.m_innerHDC, brush)
+			pyRect = (int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + self.m_offsetX + 1) * self.m_scaleFactorX), int((bottom + self.m_offsetY + 1) * self.m_scaleFactorY))
+			win32gui.FillRect(self.m_innerHDC, pyRect, brush)
+			win32gui.DeleteObject(brush)
 	#填充多边形 
 	#color:颜色
 	#left:左侧坐标 
@@ -274,18 +322,27 @@ class FCPaint(object):
 	#bottom:下方坐标
 	def fillPolygon(self, color, apt):
 		if(len(apt) > 1):
-			brush = win32gui.CreateSolidBrush(toColor(color))
-			win32gui.SelectObject(self.m_innerHDC, brush)
-			for i in range(0,len(apt)):
-				x,y = apt[i]
-				x = x + self.m_offsetX
-				y = y + self.m_offsetY
-				if (self.m_scaleFactorX != 1 or self.m_scaleFactorY != 1):
-					x = m_scaleFactorX * x;
-					y = m_scaleFactorY * y;
-				apt[i] = (int(x), int(y))
-			win32gui.Polygon(self.m_innerHDC, apt)
-			win32gui.DeleteObject(brush)
+			if(self.m_gdiPlusPaint != None):
+				strApt = ""
+				for i in range(0,len(apt)):
+					x,y = apt[i]
+					strApt += str(x) + "," + str(y)
+					if(i != len(apt) - 1):
+						strApt += " "
+				self.m_gdiPlusPaint.fillPolygon(toColor(color), strApt)
+			else:
+				brush = win32gui.CreateSolidBrush(toColor(color))
+				win32gui.SelectObject(self.m_innerHDC, brush)
+				for i in range(0,len(apt)):
+					x,y = apt[i]
+					x = x + self.m_offsetX
+					y = y + self.m_offsetY
+					if (self.m_scaleFactorX != 1 or self.m_scaleFactorY != 1):
+						x = m_scaleFactorX * x;
+						y = m_scaleFactorY * y;
+					apt[i] = (int(x), int(y))
+				win32gui.Polygon(self.m_innerHDC, apt)
+				win32gui.DeleteObject(brush)
 	#填充椭圆 
 	#color:颜色
 	#left:左侧坐标 
@@ -293,11 +350,14 @@ class FCPaint(object):
 	#right:右侧坐标 
 	#bottom:下方坐标
 	def fillEllipse(self, color, left, top, right, bottom):
-		brush = win32gui.CreateSolidBrush(toColor(color))
-		win32gui.SelectObject(self.m_innerHDC, brush)
-		pyRect = (int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.Ellipse(self.m_innerHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.DeleteObject(brush)
+		if(self.m_gdiPlusPaint != None):
+			self.m_gdiPlusPaint.fillEllipse(toColor(color), int(left), int(top), int(right), int(bottom))
+		else:
+			brush = win32gui.CreateSolidBrush(toColor(color))
+			win32gui.SelectObject(self.m_innerHDC, brush)
+			pyRect = (int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.Ellipse(self.m_innerHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.DeleteObject(brush)
 	#填充饼图
 	#color:颜色
 	#left:左侧坐标 
@@ -307,43 +367,56 @@ class FCPaint(object):
 	#startAngle:开始角度
 	#sweepAngle:持续角度
 	def fillPie(self, color, left, top, right, bottom, startAngle, sweepAngle):
-		brush = win32gui.CreateSolidBrush(toColor(color))
-		win32gui.SelectObject(self.m_innerHDC, brush)
-		oX = (left + (right - left) / 2)
-		oY = (top + (bottom - top) / 2)
-		rX = (right - left) / 2
-		rY = (bottom - top) / 2
-		x1 = oX + (rX) * math.cos(startAngle * 3.1415926 / 180)
-		y1 = oY + (rY) * math.sin(startAngle * 3.1415926 / 180)
-		x2 = oX + (rX) * math.cos((startAngle + sweepAngle) * 3.1415926 / 180)
-		y2 = oY + (rY) * math.sin((startAngle + sweepAngle) * 3.1415926 / 180)
-		win32gui.Pie(self.m_innerHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY), int((x1 + self.m_offsetX) * self.m_scaleFactorX), int((y1 + self.m_offsetY) * self.m_scaleFactorY), int((x2 + self.m_offsetX) * self.m_scaleFactorX), int((y2 + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.DeleteObject(brush)
+		if(self.m_gdiPlusPaint != None):
+			self.m_gdiPlusPaint.fillPie(toColor(color), int(left), int(top), int(right), int(bottom), startAngle, sweepAngle)
+		else:
+			brush = win32gui.CreateSolidBrush(toColor(color))
+			win32gui.SelectObject(self.m_innerHDC, brush)
+			oX = (left + (right - left) / 2)
+			oY = (top + (bottom - top) / 2)
+			rX = (right - left) / 2
+			rY = (bottom - top) / 2
+			x1 = oX + (rX) * math.cos(startAngle * 3.1415926 / 180)
+			y1 = oY + (rY) * math.sin(startAngle * 3.1415926 / 180)
+			x2 = oX + (rX) * math.cos((startAngle + sweepAngle) * 3.1415926 / 180)
+			y2 = oY + (rY) * math.sin((startAngle + sweepAngle) * 3.1415926 / 180)
+			win32gui.Pie(self.m_innerHDC, int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + self.m_offsetX) * self.m_scaleFactorX), int((bottom + self.m_offsetY) * self.m_scaleFactorY), int((x1 + self.m_offsetX) * self.m_scaleFactorX), int((y1 + self.m_offsetY) * self.m_scaleFactorY), int((x2 + self.m_offsetX) * self.m_scaleFactorX), int((y2 + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.DeleteObject(brush)
 	#设置偏移量
 	#offsetX:横向偏移 
 	#offsetY:纵向偏移
 	def setOffset(self, offsetX, offsetY):
-		self.m_offsetX = offsetX
-		self.m_offsetY = offsetY
+		if(self.m_gdiPlusPaint != None):
+			self.m_gdiPlusPaint.setOffset(int(offsetX), int(offsetY))
+		else:
+			self.m_offsetX = offsetX
+			self.m_offsetY = offsetY
 	#获取字体大小 
 	#text:文字 
 	#font:字体
 	def textSize(self, text, font):
-		fontSize = float(font.split(" ")[0].replace("px", "")) + 7
-		if(fontSize != self.m_textSize):
-			if(self.m_hOldFont != None):
-				win32gui.SelectObject(self.m_innerHDC, self.m_hOldFont);
-				self.m_hOldFont = None
-			lf = win32gui.LOGFONT()
-			lf.lfFaceName = self.m_systemFont
-			self.m_textSize = fontSize
-			lf.lfHeight = self.m_textSize
-			#lf.lfWeight = 700
-			self.m_hFont = win32gui.CreateFontIndirect(lf)
-			self.m_hOldFont = win32gui.SelectObject(self.m_innerHDC, self.m_hFont);
-			win32gui.SelectObject(self.m_innerHDC, self.m_hFont)
-		cx, cy = win32gui.GetTextExtentPoint32(self.m_innerHDC, text)
-		return FCSize(cx,cy)
+		if(self.m_gdiPlusPaint != None):
+			newFont = font.split(" ")[1] + "," + font.split(" ")[0].replace("px", "")
+			recvData = create_string_buffer(1024)
+			self.m_gdiPlusPaint.textSize(text, newFont, -1, recvData)
+			sizeStr = str(recvData.value, encoding="gbk")
+			return FCSize(int(sizeStr.split(",")[0]),int(sizeStr.split(",")[1]))
+		else:
+			fontSize = float(font.split(" ")[0].replace("px", "")) + 7
+			if(fontSize != self.m_textSize):
+				if(self.m_hOldFont != None):
+					win32gui.SelectObject(self.m_innerHDC, self.m_hOldFont);
+					self.m_hOldFont = None
+				lf = win32gui.LOGFONT()
+				lf.lfFaceName = self.m_systemFont
+				self.m_textSize = fontSize
+				lf.lfHeight = self.m_textSize
+				#lf.lfWeight = 700
+				self.m_hFont = win32gui.CreateFontIndirect(lf)
+				self.m_hOldFont = win32gui.SelectObject(self.m_innerHDC, self.m_hFont);
+				win32gui.SelectObject(self.m_innerHDC, self.m_hFont)
+			cx, cy = win32gui.GetTextExtentPoint32(self.m_innerHDC, text)
+			return FCSize(cx,cy)
 	#绘制矩形 
 	#text文字 
 	#color:颜色 
@@ -353,61 +426,72 @@ class FCPaint(object):
 	#right:右侧坐标 
 	#bottom:方坐标
 	def drawTextAutoEllipsis(self, text, color, font, left, top, right, bottom):
-		fontSize = float(font.split(" ")[0].replace("px", "")) + 7
-		if(fontSize != self.m_textSize):
-			if(self.m_hOldFont != None):
-				win32gui.SelectObject(self.m_innerHDC, self.m_hOldFont);
-				self.m_hOldFont = None
+		if(self.m_gdiPlusPaint != None):
+			newFont = font.split(" ")[1] + "," + font.split(" ")[0].replace("px", "")
+			self.m_gdiPlusPaint.drawTextAutoEllipsis(text, toColor(color), newFont, int(left), int(top), int(right), int(bottom))
+		else:
+			fontSize = float(font.split(" ")[0].replace("px", "")) + 7
+			if(fontSize != self.m_textSize):
+				if(self.m_hOldFont != None):
+					win32gui.SelectObject(self.m_innerHDC, self.m_hOldFont);
+					self.m_hOldFont = None
+				lf = win32gui.LOGFONT()
+				lf.lfFaceName = self.m_systemFont
+				self.m_textSize = fontSize
+				lf.lfHeight = self.m_textSize
+				#lf.lfWeight = 700
+				self.m_hFont = win32gui.CreateFontIndirect(lf)
+				self.m_hOldFont = win32gui.SelectObject(self.m_innerHDC, self.m_hFont);
+				win32gui.SelectObject(self.m_innerHDC, self.m_hFont)
+			win32gui.SetTextColor(self.m_innerHDC, toColor(color))
+			textSize = self.textSize(text,font)
+			pyRect = (int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + textSize.cx + self.m_offsetX) * self.m_scaleFactorX), int((bottom + textSize.cy + self.m_offsetY) * self.m_scaleFactorY))
+			win32gui.DrawText(self.m_innerHDC, text, len(text), pyRect, DT_NOPREFIX|DT_WORD_ELLIPSIS|0)
+	#设置裁剪
+	#rect:区域
+	def setClip(self, rect):
+		if(self.m_gdiPlusPaint != None):
+			self.m_gdiPlusPaint.setClip(int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+	#开始裁剪
+	#rect:区域
+	def beginClip(self, rect):
+		if(self.m_gdiPlusPaint == None):
+			self.m_innerHDC = win32gui.CreateCompatibleDC(self.m_drawHDC)
+			win32gui.SetGraphicsMode(self.m_innerHDC, GM_ADVANCED)
+			win32gui.SetBkMode(self.m_innerHDC, TRANSPARENT)
+			self.m_offsetX = 0
+			self.m_offsetY = 0
+			self.m_innerBM = win32gui.CreateCompatibleBitmap(self.m_drawHDC, int(rect.right - rect.left),  int(rect.bottom - rect.top))
+			win32gui.SelectObject(self.m_innerHDC, self.m_innerBM)
 			lf = win32gui.LOGFONT()
 			lf.lfFaceName = self.m_systemFont
-			self.m_textSize = fontSize
+			self.m_textSize = 19
 			lf.lfHeight = self.m_textSize
 			#lf.lfWeight = 700
 			self.m_hFont = win32gui.CreateFontIndirect(lf)
 			self.m_hOldFont = win32gui.SelectObject(self.m_innerHDC, self.m_hFont);
 			win32gui.SelectObject(self.m_innerHDC, self.m_hFont)
-		win32gui.SetTextColor(self.m_innerHDC, toColor(color))
-		textSize = self.textSize(text,font)
-		pyRect = (int((left + self.m_offsetX) * self.m_scaleFactorX), int((top + self.m_offsetY) * self.m_scaleFactorY), int((right + textSize.cx + self.m_offsetX) * self.m_scaleFactorX), int((bottom + textSize.cy + self.m_offsetY) * self.m_scaleFactorY))
-		win32gui.DrawText(self.m_innerHDC, text, len(text), pyRect, DT_NOPREFIX|DT_WORD_ELLIPSIS|0)
-	#开始裁剪
-	#rect:区域
-	def beginClip(self, rect):
-		self.m_innerHDC = win32gui.CreateCompatibleDC(self.m_drawHDC)
-		win32gui.SetGraphicsMode(self.m_innerHDC, GM_ADVANCED)
-		win32gui.SetBkMode(self.m_innerHDC, TRANSPARENT)
-		self.m_offsetX = 0
-		self.m_offsetY = 0
-		self.m_innerBM = win32gui.CreateCompatibleBitmap(self.m_drawHDC, int(rect.right - rect.left),  int(rect.bottom - rect.top))
-		win32gui.SelectObject(self.m_innerHDC, self.m_innerBM)
-		lf = win32gui.LOGFONT()
-		lf.lfFaceName = self.m_systemFont
-		self.m_textSize = 19
-		lf.lfHeight = self.m_textSize
-		#lf.lfWeight = 700
-		self.m_hFont = win32gui.CreateFontIndirect(lf)
-		self.m_hOldFont = win32gui.SelectObject(self.m_innerHDC, self.m_hFont);
-		win32gui.SelectObject(self.m_innerHDC, self.m_hFont)
 
 	#结束裁剪
 	#rect:区域
 	#clipRect:裁剪区域
 	def endClip(self, rect, clipRect):	
-		if(self.m_hOldFont != None):
-			win32gui.SelectObject(self.m_innerHDC, self.m_hOldFont);
-			self.m_hOldFont = None
-		if(self.m_hFont != None):
-			win32gui.DeleteObject(self.m_hFont);
-			self.m_hFont = None
-		win32gui.StretchBlt(self.m_drawHDC, int(clipRect.left), int(clipRect.top), int(clipRect.right - clipRect.left), int(clipRect.bottom - clipRect.top), self.m_innerHDC, int(clipRect.left - rect.left), int(clipRect.top - rect.top), int(clipRect.right - clipRect.left), int(clipRect.bottom - clipRect.top), 13369376)
-		if(self.m_innerHDC != None):
-			win32gui.DeleteObject(self.m_innerHDC)
-			self.m_innerHDC = None
-		if(self.m_innerBM != None):
-			win32gui.DeleteObject(self.m_innerBM)
-			self.m_innerBM = None
-		self.m_innerHDC = self.m_drawHDC
-		self.m_innerBM = self.m_memBM
+		if(self.m_gdiPlusPaint == None):
+			if(self.m_hOldFont != None):
+				win32gui.SelectObject(self.m_innerHDC, self.m_hOldFont);
+				self.m_hOldFont = None
+			if(self.m_hFont != None):
+				win32gui.DeleteObject(self.m_hFont);
+				self.m_hFont = None
+			win32gui.StretchBlt(self.m_drawHDC, int(clipRect.left), int(clipRect.top), int(clipRect.right - clipRect.left), int(clipRect.bottom - clipRect.top), self.m_innerHDC, int(clipRect.left - rect.left), int(clipRect.top - rect.top), int(clipRect.right - clipRect.left), int(clipRect.bottom - clipRect.top), 13369376)
+			if(self.m_innerHDC != None):
+				win32gui.DeleteObject(self.m_innerHDC)
+				self.m_innerHDC = None
+			if(self.m_innerBM != None):
+				win32gui.DeleteObject(self.m_innerBM)
+				self.m_innerBM = None
+			self.m_innerHDC = self.m_drawHDC
+			self.m_innerBM = self.m_memBM
 
 #基础视图
 class FCView(object):
@@ -442,7 +526,7 @@ class FCView(object):
 		self.m_backImage = "" #背景图片
 		self.m_topMost = FALSE #是否置顶
 		self.m_clipRect = None #裁剪区域
-		self.m_font = "12px Arial" #字体
+		self.m_font = "14px Arial" #字体
 		self.m_type = "" #类型
 		self.m_views = [] #子视图
 		self.m_hWnd = None #子视图句柄
@@ -548,7 +632,7 @@ class FCGridColumn(object):
 		self.m_text = "" #文字
 		self.m_type = "" #类型
 		self.m_width = 120 #宽度
-		self.m_font = "12px Arial" #字体
+		self.m_font = "14px Arial" #字体
 		self.m_backColor = "rgb(50,50,50)" #背景色
 		self.m_borderColor = "rgb(100,100,100)" #边线颜色
 		self.m_textColor = "rgb(200,200,200)" #文字颜色
@@ -566,7 +650,7 @@ class FCGridCell(object):
 		self.m_backColor = "none" #背景色
 		self.m_borderColor = "none" #边线颜色
 		self.m_textColor = "rgb(255,255,255)" #文字颜色
-		self.m_font = "12px Arial" #字体
+		self.m_font = "14px Arial" #字体
 		self.m_colSpan = 1 #列距
 		self.m_rowSpan = 1 #行距
 		self.m_column = None #所在列
@@ -725,7 +809,7 @@ class FCChart(FCView):
 		self.m_indMin2 = 0 #指标层2的最小值
 		self.m_crossTipColor = "rgb(50,50,50)" #十字线标识的颜色
 		self.m_crossLineColor = "rgb(100,100,100)" #十字线的颜色
-		self.m_font = "12px Arial" #字体
+		self.m_font = "14px Arial" #字体
 		self.m_candleDigit = 2 #K线层保留小数的位数
 		self.m_volDigit = 0 #成交量层保留小数的位数
 		self.m_indDigit = 2 #指标层保留小数的位数
@@ -948,6 +1032,7 @@ def getIntersectRect(lpDestRect, lpSrc1Rect, lpSrc2Rect):
 #views:视图集合
 def findView(mp, views):
 	size = len(views)
+	#先判断置顶视图
 	for i in range(0, size):
 		view = views[size - i - 1]
 		if(view.m_visible and view.m_topMost):
@@ -966,6 +1051,7 @@ def findView(mp, views):
 					if(subView != None):
 						return subView
 				return view
+	#再判断非置顶视图
 	for i in range(0, size):
 		view = views[size - i - 1]
 		if(view.m_visible and view.m_topMost == FALSE):
@@ -997,6 +1083,7 @@ def drawCheckBox(checkBox, paint, clipRect):
 		eRight = checkBox.m_buttonSize.cx + 10
 		eRect = FCRect(1, (height - checkBox.m_buttonSize.cy) / 2, checkBox.m_buttonSize.cx + 1, (height + checkBox.m_buttonSize.cy) / 2)
 		paint.drawRect(checkBox.m_textColor, 1, 0, eRect.left, eRect.top, eRect.right, eRect.bottom)
+		#绘制选中区域
 		if(checkBox.m_checked):
 			eRect.left += 2
 			eRect.top += 2
@@ -1017,6 +1104,7 @@ def drawRadioButton(radioButton, paint, clipRect):
 		eRight = radioButton.m_buttonSize.cx + 10
 		eRect = FCRect(1, (height - radioButton.m_buttonSize.cy) / 2, radioButton.m_buttonSize.cx + 1, (height + radioButton.m_buttonSize.cy) / 2)
 		paint.drawEllipse(radioButton.m_textColor, 1, 0, eRect.left, eRect.top, eRect.right, eRect.bottom)
+		#绘制选中区域
 		if(radioButton.m_checked):
 			eRect.left += 2
 			eRect.top += 2
@@ -1039,6 +1127,7 @@ def clickCheckBox(checkBox, mp):
 def clickRadioButton(radioButton, mp):
 	hasOther = FALSE
 	if(radioButton.m_parent != None and len(radioButton.m_parent.m_views) > 0):
+		#将相同groupName的单选按钮都取消选中
 		for i in range(0, len(radioButton.m_parent.m_views)):
 			rView = radioButton.m_parent.m_views[i]
 			if(rView.m_type == "radiobutton"):
@@ -1051,25 +1140,30 @@ def clickRadioButton(radioButton, mp):
 #paint:绘图对象 
 #clipRect:裁剪区域
 def drawButton(button, paint, clipRect):
+	#鼠标按下
 	if(button == m_mouseDownView):
 		if(button.m_pushedColor != "none"):
 			paint.fillRect(button.m_pushedColor, 0, 0, button.m_size.cx, button.m_size.cy)
 		else:
 			if(button.m_backColor != "none"):
 				paint.fillRect(button.m_backColor, 0, 0, button.m_size.cx, button.m_size.cy)
+	#鼠标悬停
 	elif(button == m_mouseMoveView):
 		if(button.m_hoveredColor != "none"):
 			paint.fillRect(button.m_hoveredColor, 0, 0, button.m_size.cx, button.m_size.cy)
 		else:
 			if(button.m_backColor != "none"):
 				paint.fillRect(button.m_backColor, 0, 0, button.m_size.cx, button.m_size.cy)
+	#常规情况
 	elif(button.m_backColor != "none"):
 		paint.fillRect(button.m_backColor, 0, 0, button.m_size.cx, button.m_size.cy)
+	#绘制文字
 	if(button.m_textColor != "none" and len(button.m_text) > 0):
 		tSize = paint.textSize(button.m_text, button.m_font)
 		paint.drawText(button.m_text, button.m_textColor, button.m_font, (button.m_size.cx - tSize.cx) / 2, (button.m_size.cy  - tSize.cy) / 2)
+	#绘制边线
 	if(button.m_borderColor != "none"):
-		paint.drawRect(button.m_borderColor, 1, 0, 0, 0, button.m_size.cx - 1, button.m_size.cy - 1)
+		paint.drawRect(button.m_borderColor, 1, 0, 0, 0, button.m_size.cx, button.m_size.cy)
 
 #获取内容的宽度 
 #div:图层
@@ -1098,6 +1192,7 @@ def getDivContentHeight(div):
 #paint:绘图对象 
 #clipRect:裁剪区域
 def drawDivScrollBar(div, paint, clipRect):
+	#判断横向滚动条
 	if (div.m_showHScrollBar):
 		contentWidth = getDivContentWidth(div);
 		if (contentWidth > div.m_size.cx):
@@ -1106,6 +1201,7 @@ def drawDivScrollBar(div, paint, clipRect):
 			if (sRight - sLeft < div.m_scrollSize):
 				sRight = sLeft + div.m_scrollSize
 			paint.fillRect(div.m_scrollBarColor, sLeft, div.m_size.cy - div.m_scrollSize, sRight, div.m_size.cy)
+	#判断纵向滚动条
 	if(div.m_showVScrollBar):
 		contentHeight = getDivContentHeight(div)	
 		if (contentHeight > div.m_size.cy):
@@ -1121,7 +1217,7 @@ def drawDivScrollBar(div, paint, clipRect):
 #clipRect:裁剪区域
 def drawDivBorder(div, paint, clipRect):
 	if(div.m_borderColor != "none"):
-		paint.drawRect(div.m_borderColor, 1, 0, 0, 0, div.m_size.cx - 1, div.m_size.cy - 1)
+		paint.drawRect(div.m_borderColor, 1, 0, 0, 0, div.m_size.cx, div.m_size.cy)
 
 #重绘图形 
 #div:视图 
@@ -1172,6 +1268,7 @@ def mouseDownDiv(div, firstTouch, secondTouch, firstPoint, secondPoint):
 	div.m_startPoint = mp
 	div.m_downScrollHButton = FALSE
 	div.m_downScrollVButton = FALSE
+	#判断横向滚动条
 	if (div.m_showHScrollBar):
 		contentWidth = getDivContentWidth(div)
 		if (contentWidth > div.m_size.cx):
@@ -1183,6 +1280,7 @@ def mouseDownDiv(div, firstTouch, secondTouch, firstPoint, secondPoint):
 				div.m_downScrollHButton = TRUE
 				div.m_startScrollH = div.m_scrollH
 				return
+	#判断纵向滚动条
 	if (div.m_showVScrollBar):
 		contentHeight = getDivContentHeight(div)
 		if (contentHeight > div.m_size.cy):
@@ -1208,6 +1306,7 @@ def mouseMoveDiv(div, firstTouch, secondTouch, firstPoint, secondPoint):
 	if (firstTouch):
 		mp = firstPoint;
 		if (div.m_showHScrollBar or div.m_showVScrollBar):
+			#判断横向滚动条
 			if (div.m_downScrollHButton):
 				contentWidth = getDivContentWidth(div)
 				subX = (mp.x - div.m_startPoint.x) / div.m_size.cx * contentWidth
@@ -1219,6 +1318,7 @@ def mouseMoveDiv(div, firstTouch, secondTouch, firstPoint, secondPoint):
 				div.m_scrollH = newScrollH
 				m_cancelClick = TRUE
 				return
+			#判断纵向滚动条
 			elif (div.m_downScrollVButton):
 				contentHeight = getDivContentHeight(div)
 				subY = (mp.y - div.m_startPoint.y) / div.m_size.cy * contentHeight
@@ -1230,6 +1330,7 @@ def mouseMoveDiv(div, firstTouch, secondTouch, firstPoint, secondPoint):
 				div.m_scrollV = newScrollV
 				m_cancelClick = TRUE
 				return
+		#判断拖动
 		if (div.m_allowDragScroll):
 			contentWidth = getDivContentWidth(div)
 			if (contentWidth > div.m_size.cx):
@@ -1291,24 +1392,28 @@ def drawTabViewBorder(tabView, paint, clipRect):
 #th:页头按钮的高度
 def updataPageLayout(tabView, tabPage, left, top, width, height, tw, th):
 	newBounds = FCRect(0, 0, 0, 0)
+	#下方
 	if(tabView.m_layout == "bottom"):
 		newBounds.left = 0
 		newBounds.top = 0
 		newBounds.right = width
 		newBounds.bottom = height - th
 		tabPage.m_headerButton.m_location = FCPoint(left, height - th)
+	#左侧
 	elif(tabView.m_layout == "left"):
 		newBounds.left = tw
 		newBounds.top = 0
 		newBounds.right = width
 		newBounds.bottom = height
 		tabPage.m_headerButton.m_location = FCPoint(0, top)
+	#右侧
 	elif(tabView.m_layout == "right"):
 		newBounds.left = 0
 		newBounds.top = 0
 		newBounds.right = width - tw
 		newBounds.bottom = height
 		tabPage.m_headerButton.m_location = FCPoint(width - tw, top)
+	#上方
 	elif(tabView.m_layout == "top"):
 		newBounds.left = 0
 		newBounds.top = th
@@ -1387,6 +1492,7 @@ def resetLayoutDiv(layout):
 			nTop = cTop
 			nWidth = cWidth
 			nHeight = cHeight
+			#从下至上
 			if(layout.m_layoutStyle == "bottomtotop"):
 				if (i == 0):
 					top = height - padding.top
@@ -1404,6 +1510,7 @@ def resetLayoutDiv(layout):
 				nLeft = left + margin.left
 				nWidth = lWidth
 				nTop = top
+			#从左到右
 			elif(layout.m_layoutStyle == "lefttoright"):
 				lHeight = 0;
 				if (layout.m_autoWrap):
@@ -1420,6 +1527,7 @@ def resetLayoutDiv(layout):
 				nTop = top + margin.top
 				nHeight = lHeight
 				left += cWidth + margin.right
+			#从右到左
 			elif(layout.m_layoutStyle == "righttoleft"):
 				if (i == 0):
 					left = width - padding.left
@@ -1437,6 +1545,7 @@ def resetLayoutDiv(layout):
 				nLeft = left
 				nTop = top + margin.top
 				nHeight = lHeight
+			#从上至下
 			elif(layout.m_layoutStyle == "toptobottom"):
 				lWidth = 0
 				if (layout.m_autoWrap):
@@ -1474,6 +1583,7 @@ def resetSplitLayoutDiv(split):
 		splitterSize.cx = split.m_splitter.m_size.cx
 		splitterSize.cy = split.m_splitter.m_size.cy
 	layoutStyle = split.m_layoutStyle 
+	#从下至上
 	if (layoutStyle == "bottomtotop"):
 		if (split.m_splitMode == "absolutesize" or split.m_oldSize.cy == 0):
 			splitRect.left = 0
@@ -1495,6 +1605,7 @@ def resetSplitLayoutDiv(split):
 		sRect.top = 0
 		sRect.right = width
 		sRect.bottom = splitRect.top
+	#从左至右
 	elif(layoutStyle == "lefttoright"):
 		if (split.m_splitMode == "absolutesize" or split.m_oldSize.cx == 0):
 			splitRect.left = split.m_splitter.m_location.x
@@ -1516,6 +1627,7 @@ def resetSplitLayoutDiv(split):
 		sRect.top = 0
 		sRect.right = width
 		sRect.bottom = height
+	#从右到左
 	elif(layoutStyle == "righttoleft"):
 		if (split.m_splitMode == "absolutesize" or split.m_oldSize.cx == 0):
 			splitRect.left = width - (split.m_oldSize.cx - split.m_splitter.m_location.x)
@@ -1537,6 +1649,7 @@ def resetSplitLayoutDiv(split):
 		sRect.top = 0
 		sRect.right = splitRect.left
 		sRect.bottom = height
+	#从上至下
 	elif(layoutStyle == "toptobottom"):
 		if (split.m_splitMode == "absolutesize" or split.m_oldSize.cy == 0):
 			splitRect.left = 0
@@ -1558,6 +1671,7 @@ def resetSplitLayoutDiv(split):
 		sRect.top = splitRect.bottom
 		sRect.right = width
 		sRect.bottom = height
+	#重置分割条
 	if(split.m_splitter.m_visible):
 		spRect = FCRect(split.m_splitter.m_location.x,  split.m_splitter.m_location.y, split.m_splitter.m_location.x + split.m_splitter.m_size.cx, split.m_splitter.m_location.y + split.m_splitter.m_size.cy)
 		if (spRect.left != splitRect.left or spRect.top != splitRect.top or spRect.right != splitRect.right or spRect.bottom != splitRect.bottom):
@@ -1565,11 +1679,13 @@ def resetSplitLayoutDiv(split):
 			split.m_splitter.m_size = FCSize(splitRect.right - splitRect.left, splitRect.bottom - splitRect.top)
 			reset = TRUE
 	fcRect = FCRect(split.m_firstView.m_location.x,  split.m_firstView.m_location.y, split.m_firstView.m_location.x + split.m_firstView.m_size.cx, split.m_firstView.m_location.y + split.m_firstView.m_size.cy)
+	#重置第一个视图
 	if (fcRect.left != fRect.left or fcRect.top != fRect.top or fcRect.right != fRect.right or fcRect.bottom != fRect.bottom):
 		reset = TRUE;
 		split.m_firstView.m_location = FCPoint(fRect.left, fRect.top)
 		split.m_firstView.m_size = FCSize(fRect.right - fRect.left, fRect.bottom - fRect.top)
 	scRect = FCRect(split.m_secondView.m_location.x,  split.m_secondView.m_location.y, split.m_secondView.m_location.x + split.m_secondView.m_size.cx, split.m_secondView.m_location.y + split.m_secondView.m_size.cy)
+	#重置第二个视图
 	if (scRect.left != sRect.left or scRect.top != sRect.top or scRect.right != sRect.right or scRect.bottom != sRect.bottom):
 		reset = TRUE;
 		split.m_secondView.m_location = FCPoint(sRect.left, sRect.top)
@@ -1607,13 +1723,17 @@ def mouseWheelGrid(grid, delta):
 #right:右侧坐标 
 #bottom:下方坐标
 def drawGridCell(grid, row, column, cell, paint, left, top, right, bottom):
+	#绘制背景
 	if (cell.m_backColor != "none"):
 		paint.fillRect(cell.m_backColor, left, top, right, bottom)
+	#绘制选中
 	if(row.m_selected):
 		if(grid.m_seletedRowColor != "none"):
 			paint.fillRect(grid.m_seletedRowColor, left, top, right, bottom)
+	#绘制边线
 	if (cell.m_borderColor != "none"):
 		paint.drawRect(cell.m_borderColor, 1, 0, left, top, right, bottom)
+	#绘制数值
 	if (cell.m_value != None):
 		tSize = paint.textSize(str(cell.m_value), cell.m_font)
 		paint.drawText(str(cell.m_value), cell.m_textColor, cell.m_font, left + 2, top + grid.m_rowHeight / 2 - tSize.cy / 2)
@@ -1650,11 +1770,14 @@ def getGridContentHeight(grid):
 #bottom:下方坐标
 def drawGridColumn(grid, column, paint, left, top, right, bottom):
 	tSize = paint.textSize(column.m_text, column.m_font)
+	#绘制背景
 	if (column.m_backColor != "none"):
 		paint.fillRect(column.m_backColor, left, top, right, bottom)
+	#绘制边线
 	if (column.m_borderColor != "none"):
 		paint.drawRect(column.m_borderColor, 1, 0, left, top, right, bottom)
 	paint.drawText(column.m_text, column.m_textColor, column.m_font, left + (column.m_width - tSize.cx) / 2, top + grid.m_headerHeight / 2 - tSize.cy / 2)
+	#绘制升序箭头
 	if (column.m_sort == "asc"):
 		cR = (bottom - top) / 4
 		oX = right - cR * 2
@@ -1664,6 +1787,7 @@ def drawGridColumn(grid, column, paint, left, top, right, bottom):
 		drawPoints.append((oX - cR, oY + cR))
 		drawPoints.append((oX + cR, oY + cR))
 		paint.fillPolygon(column.m_textColor, drawPoints)
+	#绘制降序箭头
 	elif (column.m_sort == "desc"):
 		cR = (bottom - top) / 4
 		oX = right - cR * 2
@@ -1673,13 +1797,11 @@ def drawGridColumn(grid, column, paint, left, top, right, bottom):
 		drawPoints.append((oX - cR, oY - cR))
 		drawPoints.append((oX + cR, oY - cR))
 		paint.fillPolygon(column.m_textColor, drawPoints)
-	
-	
 
-m_paintGridCellCallBack = None #绘制单元格回调
-m_paintGridColumnCallBack = None #绘制列头的回调
-m_clickGridCellCallBack = None #点击单元格的回调
-m_clickGridColumnCallBack = None #点击列头的回调
+m_paintGridCellCallBack = None #绘制单元格的事件回调
+m_paintGridColumnCallBack = None #绘制列头的事件回调
+m_clickGridCellCallBack = None #点击单元格的事件回调
+m_clickGridColumnCallBack = None #点击列头的事件回调
 
 #绘制表格 
 #grid:表格
@@ -1689,6 +1811,7 @@ def drawGrid(grid, paint, clipRect):
 	cLeft = -grid.m_scrollH
 	cTop = -grid.m_scrollV + grid.m_headerHeight
 	colLeft = 0
+	#重置列头
 	for i in range(0, len(grid.m_columns)):
 		column = grid.m_columns[i]
 		colRect = FCRect(colLeft, 0, colLeft + grid.m_columns[i].m_width, grid.m_headerHeight)
@@ -1700,6 +1823,7 @@ def drawGrid(grid, paint, clipRect):
 		if(row.m_visible):
 			rTop = cTop
 			rBottom = cTop + grid.m_rowHeight
+			#绘制非冻结列
 			if (rBottom >= 0 and cTop <= grid.m_size.cy):
 				for j in range(0, len(row.m_cells)):
 					cell = row.m_cells[j]
@@ -1728,6 +1852,7 @@ def drawGrid(grid, paint, clipRect):
 									m_paintGridCellCallBack(grid, row, gridColumn, cell, paint, cRect.left, cRect.top, cRect.right, cRect.bottom)
 								else:
 									drawGridCell(grid, row, gridColumn, cell, paint, cRect.left, cRect.top, cRect.right, cRect.bottom)
+			#绘制冻结列
 			if (rBottom >= 0 and cTop <= grid.m_size.cy):
 				for j in range(0, len(row.m_cells)):
 					cell = row.m_cells[j]
@@ -1760,6 +1885,7 @@ def drawGrid(grid, paint, clipRect):
 				break;
 			cTop += grid.m_rowHeight
 	if (grid.m_headerHeight > 0):
+		#绘制非冻结列
 		for gridColumn in grid.m_columns:
 			if (gridColumn.m_visible):
 				if (gridColumn.m_frozen == FALSE):
@@ -1769,6 +1895,7 @@ def drawGrid(grid, paint, clipRect):
 						drawGridColumn(grid, gridColumn, paint, cLeft, 0, cLeft + gridColumn.m_width, grid.m_headerHeight)
 				cLeft += gridColumn.m_width
 		cLeft = 0;
+		#绘制冻结列
 		for gridColumn in grid.m_columns:
 			if (gridColumn.m_visible):
 				if (gridColumn.m_frozen):
@@ -1783,6 +1910,7 @@ def drawGrid(grid, paint, clipRect):
 #paint:绘图对象
 #clipRect:裁剪区域
 def drawGridScrollBar(grid, paint, clipRect):
+	#绘制横向滚动条
 	if (grid.m_showHScrollBar):
 		contentWidth = getGridContentWidth(grid)
 		if (contentWidth > grid.m_size.cx):
@@ -1791,6 +1919,7 @@ def drawGridScrollBar(grid, paint, clipRect):
 			if (sRight - sLeft < grid.m_scrollSize):
 				sRight = sLeft + grid.m_scrollSize
 			paint.fillRect(grid.m_scrollBarColor, sLeft, grid.m_size.cy - grid.m_scrollSize, sRight, grid.m_size.cy)
+	#绘制纵向滚动条
 	if(grid.m_showVScrollBar):
 		contentHeight = getGridContentHeight(grid)
 		if (contentHeight > grid.m_size.cy - grid.m_headerHeight):
@@ -1810,6 +1939,7 @@ def mouseMoveGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 	if (firstTouch):
 		mp = firstPoint;
 		if (grid.m_showHScrollBar or grid.m_showVScrollBar):
+			#判断横向滚动条
 			if (grid.m_downScrollHButton):
 				contentWidth = getGridContentWidth(grid)
 				subX = (mp.x - grid.m_startPoint.x) / grid.m_size.cx * contentWidth
@@ -1821,6 +1951,7 @@ def mouseMoveGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 				grid.m_scrollH = newScrollH
 				m_cancelClick = TRUE
 				return
+			#判断纵向滚动条
 			elif(grid.m_downScrollVButton):
 				contentHeight = getGridContentHeight(grid)
 				subY = (mp.y - grid.m_startPoint.y) / (grid.m_size.cy - grid.m_headerHeight - grid.m_scrollSize) * contentHeight
@@ -1832,6 +1963,7 @@ def mouseMoveGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 				grid.m_scrollV = newScrollV
 				m_cancelClick = TRUE
 				return
+		#处理拖动
 		if (grid.m_allowDragScroll):
 			contentWidth = getGridContentWidth(grid)
 			if (contentWidth > grid.m_size.cx - grid.m_scrollSize):
@@ -1867,6 +1999,7 @@ def mouseDownGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 	grid.m_startPoint = mp
 	grid.m_downScrollHButton = FALSE
 	grid.m_downScrollVButton = FALSE
+	#判断横向滚动条
 	if (grid.m_showHScrollBar):
 		contentWidth = getGridContentWidth(grid)
 		if (contentWidth > grid.m_size.cx - grid.m_scrollSize):
@@ -1878,6 +2011,7 @@ def mouseDownGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 				grid.m_downScrollHButton = TRUE
 				grid.m_startScrollH = grid.m_scrollH
 				return
+	#判断纵向滚动条
 	if(grid.m_showVScrollBar):
 		contentHeight = getGridContentHeight(grid)
 		if (contentHeight > grid.m_size.cy - grid.m_headerHeight - grid.m_scrollSize):
@@ -1907,6 +2041,7 @@ def mouseUpGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 	cLeft = -grid.m_scrollH
 	cTop = -grid.m_scrollV + grid.m_headerHeight
 	colLeft = 0
+	#重置列
 	for i in range(0, len(grid.m_columns)):
 		column = grid.m_columns[i]
 		colRect = FCRect(colLeft, 0, colLeft + grid.m_columns[i].m_width, grid.m_headerHeight)
@@ -1918,6 +2053,7 @@ def mouseUpGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 		if(row.m_visible):
 			rTop = cTop
 			rBottom = cTop + grid.m_rowHeight
+			#判断非冻结列
 			if (rBottom >= 0 and cTop <= grid.m_size.cy):
 				for j in range(0, len(row.m_cells)):
 					cell = row.m_cells[j]
@@ -1925,7 +2061,7 @@ def mouseUpGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 					if (gridColumn == None):
 						gridColumn = grid.m_columns[j]
 					if (gridColumn.m_visible):
-						if (gridColumn.m_frozen == FALSE):
+						if (gridColumn.m_frozen):
 							cellWidth = gridColumn.m_width
 							colSpan = cell.m_colSpan
 							if (colSpan > 1):
@@ -1951,6 +2087,7 @@ def mouseUpGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 									if(m_clickGridCellCallBack != None):
 										m_clickGridCellCallBack(grid, row, gridColumn, cell, firstTouch, secondTouch, firstPoint, secondPoint)
 									return;
+			#判断冻结列
 			if (rBottom >= 0 and cTop <= grid.m_size.cy):
 				for j in range(0, len(row.m_cells)):
 					cell = row.m_cells[j]
@@ -1958,7 +2095,7 @@ def mouseUpGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 					if (gridColumn == None):
 						gridColumn = grid.m_columns[j]
 					if (gridColumn.m_visible):
-						if (gridColumn.m_frozen):
+						if (gridColumn.m_frozen == FALSE):
 							cellWidth = gridColumn.m_width
 							colSpan = cell.m_colSpan
 							if (colSpan > 1):
@@ -1987,6 +2124,7 @@ def mouseUpGrid(grid, firstTouch, secondTouch, firstPoint, secondPoint):
 			if (cTop > grid.m_size.cy):
 				break;
 			cTop += grid.m_rowHeight
+	#判断列头
 	if (grid.m_headerHeight > 0 and firstPoint.y <= grid.m_headerHeight):
 		for gridColumn in grid.m_columns:
 			if (gridColumn.m_visible):
@@ -2063,6 +2201,7 @@ def getTreeContentHeight(tree):
 #paint:绘图对象
 #clipRect:裁剪区域
 def drawTreeScrollBar(tree, paint, clipRect):
+	#判断横向滚动条
 	if (tree.m_showHScrollBar):
 		contentWidth = getTreeContentWidth(tree)
 		if (contentWidth > tree.m_size.cx):
@@ -2071,6 +2210,7 @@ def drawTreeScrollBar(tree, paint, clipRect):
 			if (sRight - sLeft < tree.m_scrollSize):
 				sRight = sLeft + tree.m_scrollSize
 			paint.fillRect(tree.m_scrollBarColor, sLeft, tree.m_size.cy - tree.m_scrollSize, sRight, tree.m_size.cy)
+	#判断纵向滚动条
 	if(tree.m_showVScrollBar):
 		contentHeight = getTreeContentHeight(tree)	
 		if (contentHeight > tree.m_size.cy):
@@ -2091,6 +2231,7 @@ def drawTreeScrollBar(tree, paint, clipRect):
 #right:右侧坐标
 #bottom:下方坐标
 def drawTreeNode(tree, row, column, node, paint, left, top, right, bottom):
+	#绘制背景
 	if (node.m_backColor != "none"):
 		paint.fillRect(node.m_backColor, left, top, right, bottom)
 	if (node.m_value != None):
@@ -2098,13 +2239,14 @@ def drawTreeNode(tree, row, column, node, paint, left, top, right, bottom):
 		tLeft = left + 2 + getTotalIndent(node)
 		wLeft = tLeft;
 		cR = tree.m_checkBoxWidth / 3
+		#绘制复选框
 		if (tree.m_showCheckBox):
 			wLeft += tree.m_checkBoxWidth;
 			if (node.m_checked):
 				paint.fillRect(node.m_textColor, tLeft + (tree.m_checkBoxWidth - cR) / 2, top + (tree.m_rowHeight - cR) / 2, tLeft + (tree.m_checkBoxWidth + cR) / 2, top + (tree.m_rowHeight + cR) / 2)
 			else:
 				paint.drawRect(node.m_textColor, 1, 0, tLeft + (tree.m_checkBoxWidth - cR) / 2, top + (tree.m_rowHeight - cR) / 2, tLeft + (tree.m_checkBoxWidth + cR) / 2, top + (tree.m_rowHeight + cR) / 2)
-
+		#绘制箭头
 		if (len(node.m_childNodes) > 0):
 			drawPoints = []
 			if (node.m_collapsed):
@@ -2117,6 +2259,7 @@ def drawTreeNode(tree, row, column, node, paint, left, top, right, bottom):
 				drawPoints.append((wLeft + tree.m_collapsedWidth / 2, top + (tree.m_rowHeight + cR) / 2))
 			paint.fillPolygon(node.m_textColor, drawPoints)
 			wLeft += tree.m_collapsedWidth
+		#绘制文字
 		if (tSize.cx > column.m_width):
 			paint.drawTextAutoEllipsis(str(node.m_value), node.m_textColor, node.m_font, wLeft, top + tree.m_rowHeight / 2, wLeft + column.m_width, top + tree.m_rowHeight / 2)
 		else:
@@ -2128,8 +2271,8 @@ def updateTreeRowIndex(tree):
 	for i in range(0,len(tree.m_rows)):
 		tree.m_rows[i].m_index = i
 
-m_paintTreeNodeCallBack = None #绘图树节点的回调
-m_clickTreeNode = None #点击树节点的事件
+m_paintTreeNodeCallBack = None #绘图树节点的事件回调
+m_clickTreeNode = None #点击树节点的事件回调
 
 #绘制树
 #tree:树
@@ -2139,6 +2282,7 @@ def drawTree(tree, paint, clipRect):
 	cLeft = -tree.m_scrollH
 	cTop = -tree.m_scrollV + tree.m_headerHeight
 	colLeft = 0
+	#重置列头
 	for i in range(0,len(tree.m_columns)):
 		colRect = FCRect(colLeft, 0, colLeft + tree.m_columns[i].m_width, tree.m_headerHeight)
 		tree.m_columns[i].m_bounds = colRect
@@ -2271,6 +2415,7 @@ def mouseMoveTree(tree, firstTouch, secondTouch, firstPoint, secondPoint):
 	if (firstTouch):
 		mp = firstPoint;
 		if (tree.m_showHScrollBar or tree.m_showVScrollBar):
+			#判断横向滚动
 			if (tree.m_downScrollHButton):
 				contentWidth = getTreeContentWidth(tree)
 				subX = (mp.x - tree.m_startPoint.x) / tree.m_size.cx * contentWidth
@@ -2282,6 +2427,7 @@ def mouseMoveTree(tree, firstTouch, secondTouch, firstPoint, secondPoint):
 				tree.m_scrollH = newScrollH
 				m_cancelClick = TRUE
 				return
+			#判断纵向滚动
 			elif (tree.m_downScrollVButton):
 				contentHeight = getTreeContentHeight(tree)
 				subY = (mp.y - tree.m_startPoint.y) / (tree.m_size.cy - tree.m_headerHeight - tree.m_scrollSize) * contentHeight
@@ -2293,6 +2439,7 @@ def mouseMoveTree(tree, firstTouch, secondTouch, firstPoint, secondPoint):
 				tree.m_scrollV = newScrollV
 				m_cancelClick = TRUE
 				return
+		#判断拖动
 		if (tree.m_allowDragScroll):
 			contentWidth = getTreeContentWidth(tree)
 			if (contentWidth > tree.m_size.cx):
@@ -2328,6 +2475,7 @@ def mouseDownTree(tree, firstTouch, secondTouch, firstPoint, secondPoint):
 	tree.m_startPoint = mp
 	tree.m_downScrollHButton = FALSE
 	tree.m_downScrollVButton = FALSE
+	#判断横向滚动
 	if (tree.m_showHScrollBar):
 		contentWidth = getTreeContentWidth(tree)
 		if (contentWidth > tree.m_size.cx):
@@ -2339,6 +2487,7 @@ def mouseDownTree(tree, firstTouch, secondTouch, firstPoint, secondPoint):
 				tree.m_downScrollHButton = TRUE
 				tree.m_startScrollH = tree.m_scrollH
 				return
+	#判断纵向滚动
 	if (tree.m_showVScrollBar):
 		contentHeight = getTreeContentHeight(tree)
 		if (contentHeight > tree.m_size.cy):
@@ -4178,15 +4327,22 @@ def getTRIXData(ticks, trixArr, matrixArr):
 #pPaint:绘图对象
 #clipRect:裁剪区域
 def drawChartPlot(chart, pPaint, clipRect):
-	if(len(chart.m_plots)):
-		paint = FCPaint()
-		paint.m_drawHDC = pPaint.m_innerHDC
-		paint.m_memBM = pPaint.m_innerBM
-		paint.m_scaleFactorX = pPaint.m_scaleFactorX
-		paint.m_scaleFactorY = pPaint.m_scaleFactorY
-		divHeight = getCandleDivHeight(chart)
-		cRect = FCRect(chart.m_leftVScaleWidth, 0, chart.m_size.cx, divHeight)
-		paint.beginClip(cRect)
+	if(len(chart.m_plots) > 0):
+		paint = None
+		if(pPaint.m_gdiPlusPaint != None):
+			paint = pPaint
+			divHeight = getCandleDivHeight(chart)
+			cRect = FCRect(chart.m_leftVScaleWidth, 0, chart.m_size.cx, divHeight)
+			paint.setClip(cRect)
+		else:
+			paint = FCPaint()
+			paint.m_drawHDC = pPaint.m_innerHDC
+			paint.m_memBM = pPaint.m_innerBM
+			paint.m_scaleFactorX = pPaint.m_scaleFactorX
+			paint.m_scaleFactorY = pPaint.m_scaleFactorY
+			divHeight = getCandleDivHeight(chart)
+			cRect = FCRect(chart.m_leftVScaleWidth, 0, chart.m_size.cx, divHeight)
+			paint.beginClip(cRect)
 		for i in range(0,len(chart.m_plots)):
 			plot = chart.m_plots[i]
 			m_index1 = 0
@@ -4650,14 +4806,17 @@ def drawChartPlot(chart, pPaint, clipRect):
 					strText = toFixed(value, chart.m_candleDigit)
 					tSize = paint.textSize(strText, chart.m_font)
 					paint.drawText(strText, chart.m_textColor, chart.m_font, chart.m_leftVScaleWidth + 2, newY - tSize.cy - 2)
-		rect = FCRect(0, 0, cRect.right - cRect.left, cRect.bottom - cRect.top)
-		win32gui.StretchBlt(paint.m_drawHDC, int(cRect.left), int(cRect.top), int(cRect.right - cRect.left), int(cRect.bottom - cRect.top), paint.m_innerHDC, int(cRect.left - rect.left), int(cRect.top - rect.top), int(cRect.right - cRect.left), int(cRect.bottom - cRect.top), SRCPAINT)
-		if(paint.m_innerHDC != None):
-			win32gui.DeleteObject(paint.m_innerHDC)
-			paint.m_innerHDC = None
-		if(paint.m_innerBM != None):
-			win32gui.DeleteObject(paint.m_innerBM)
-			paint.m_innerBM = None
+		if(paint.m_gdiPlusPaint == None):
+			rect = FCRect(0, 0, cRect.right - cRect.left, cRect.bottom - cRect.top)
+			win32gui.StretchBlt(paint.m_drawHDC, int(cRect.left), int(cRect.top), int(cRect.right - cRect.left), int(cRect.bottom - cRect.top), paint.m_innerHDC, int(cRect.left - rect.left), int(cRect.top - rect.top), int(cRect.right - cRect.left), int(cRect.bottom - cRect.top), SRCPAINT)
+			if(paint.m_innerHDC != None):
+				win32gui.DeleteObject(paint.m_innerHDC)
+				paint.m_innerHDC = None
+			if(paint.m_innerBM != None):
+				win32gui.DeleteObject(paint.m_innerBM)
+				paint.m_innerBM = None
+		else:
+			paint.setClip(FCRect(0, 0, chart.m_size.cx, chart.m_size.cy))
 
 #选中直线
 #chart: K线
@@ -5622,9 +5781,9 @@ def drawChartStock(chart, paint, clipRect):
 						if (close == openValue):
 							paint.drawLine(chart.m_upColor, m_lineWidth_Chart, 0, x - cWidth, closeY, x + cWidth, closeY)
 						else:
-							paint.fillRect(chart.m_upColor, x - cWidth, closeY, x + cWidth, openY)
+							paint.fillRect(chart.m_upColor, x - cWidth, closeY, x + cWidth + 1, openY)
 						if(volHeight > 0):
-							paint.fillRect(chart.m_upColor, x - cWidth, volY, x + cWidth, zeroY)
+							paint.fillRect(chart.m_upColor, x - cWidth, volY, x + cWidth + 1, zeroY)
 					else:
 						if(volHeight > 0):
 							paint.drawLine(chart.m_upColor, m_lineWidth_Chart, 0, x - cWidth, volY, x + cWidth, zeroY)
@@ -5635,9 +5794,9 @@ def drawChartStock(chart, paint, clipRect):
 				else:
 					paint.drawLine(chart.m_downColor, m_lineWidth_Chart, 0, x, highY, x, lowY)
 					if (cWidth > 0):
-						paint.fillRect(chart.m_downColor, x - cWidth, openY, x + cWidth, closeY)
+						paint.fillRect(chart.m_downColor, x - cWidth, openY, x + cWidth + 1, closeY)
 						if(volHeight > 0):
-							paint.fillRect(chart.m_downColor, x - cWidth, volY, x + cWidth, zeroY)
+							paint.fillRect(chart.m_downColor, x - cWidth, volY, x + cWidth + 1, zeroY)
 					else:
 						if(volHeight > 0):
 							paint.drawLine(chart.m_downColor, m_lineWidth_Chart, 0, x - cWidth, volY, x + cWidth, zeroY)
@@ -5668,14 +5827,21 @@ def drawChartStock(chart, paint, clipRect):
 						paint.drawText(tag, chart.m_textColor, chart.m_font, x - tSize.cx / 2, lowY + 2)
 						hasMinTag = TRUE
 		if (isTrend == FALSE):
-			newPaint = FCPaint()
-			newPaint.m_drawHDC = paint.m_innerHDC
-			newPaint.m_memBM = paint.m_innerBM
-			newPaint.m_scaleFactorX = paint.m_scaleFactorX
-			newPaint.m_scaleFactorY = paint.m_scaleFactorY
-			divHeight = getCandleDivHeight(chart)
-			cRect = FCRect(chart.m_leftVScaleWidth, 0, chart.m_size.cx, divHeight)
-			newPaint.beginClip(cRect)
+			newPaint = None
+			if(paint.m_gdiPlusPaint != None):
+				newPaint = paint
+				divHeight = getCandleDivHeight(chart)
+				cRect = FCRect(chart.m_leftVScaleWidth, 0, chart.m_size.cx, divHeight)
+				newPaint.setClip(cRect)
+			else:
+				newPaint = FCPaint()
+				newPaint.m_drawHDC = paint.m_innerHDC
+				newPaint.m_memBM = paint.m_innerBM
+				newPaint.m_scaleFactorX = paint.m_scaleFactorX
+				newPaint.m_scaleFactorY = paint.m_scaleFactorY
+				divHeight = getCandleDivHeight(chart)
+				cRect = FCRect(chart.m_leftVScaleWidth, 0, chart.m_size.cx, divHeight)
+				newPaint.beginClip(cRect)
 			if (chart.m_mainIndicator == "BOLL"):
 				if(chart.m_selectShape == chart.m_mainIndicator and chart.m_selectShapeEx == "MID"):
 					drawChartLines(chart, newPaint, clipRect, 0, chart.m_boll_mid, m_indicatorColors[0], TRUE)
@@ -5714,14 +5880,18 @@ def drawChartStock(chart, paint, clipRect):
 					drawChartLines(chart, newPaint, clipRect, 0, chart.m_ma250, m_indicatorColors[5], TRUE)
 				else:
 					drawChartLines(chart, newPaint, clipRect, 0, chart.m_ma250, m_indicatorColors[5], FALSE)
-			rect = FCRect(0, 0, cRect.right - cRect.left, cRect.bottom - cRect.top)
-			win32gui.StretchBlt(newPaint.m_drawHDC, int(cRect.left), int(cRect.top), int(cRect.right - cRect.left), int(cRect.bottom - cRect.top), newPaint.m_innerHDC, int(cRect.left - rect.left), int(cRect.top - rect.top), int(cRect.right - cRect.left), int(cRect.bottom - cRect.top), SRCPAINT)
-			if(newPaint.m_innerHDC != None):
-				win32gui.DeleteObject(newPaint.m_innerHDC)
-				newPaint.m_innerHDC = None
-			if(newPaint.m_innerBM != None):
-				win32gui.DeleteObject(newPaint.m_innerBM)
-				newPaint.m_innerBM = None
+			if(newPaint.m_gdiPlusPaint == None):
+				rect = FCRect(0, 0, cRect.right - cRect.left, cRect.bottom - cRect.top)
+				win32gui.StretchBlt(newPaint.m_drawHDC, int(cRect.left), int(cRect.top), int(cRect.right - cRect.left), int(cRect.bottom - cRect.top), newPaint.m_innerHDC, int(cRect.left - rect.left), int(cRect.top - rect.top), int(cRect.right - cRect.left), int(cRect.bottom - cRect.top), SRCPAINT)
+				if(newPaint.m_innerHDC != None):
+					win32gui.DeleteObject(newPaint.m_innerHDC)
+					newPaint.m_innerHDC = None
+				if(newPaint.m_innerBM != None):
+					win32gui.DeleteObject(newPaint.m_innerBM)
+					newPaint.m_innerBM = None
+			else:
+				newPaint.setClip(FCRect(0, 0, chart.m_size.cx, chart.m_size.cy))
+			
 		if (indHeight > 0):
 			if (chart.m_showIndicator == "MACD"):
 				zeroY = getChartY(chart, 2, 0)
@@ -5906,7 +6076,7 @@ def drawChart(chart, paint, clipRect):
 	else:
 		drawChartCrossLine(chart, paint, clipRect)
 	if (chart.m_borderColor != "none"):
-		paint.drawRect(chart.m_borderColor, m_lineWidth_Chart, 0, 0, 0, chart.m_size.cx - 1, chart.m_size.cy - 1)
+		paint.drawRect(chart.m_borderColor, m_lineWidth_Chart, 0, 0, 0, chart.m_size.cx, chart.m_size.cy)
 
 #重绘视图 
 #views:视图集合 
@@ -5932,10 +6102,11 @@ def renderViews(views, paint, rect):
 			clipRect = FCRect(clx, cly, clx + view.m_size.cx, cly + view.m_size.cy)
 			destRect = FCRect(0, 0, 0, 0)
 			if(getIntersectRect(destRect, rect, clipRect) > 0):
-				paint.setOffset(0, 0)
 				view.m_clipRect = destRect
 				paint.setOffset(clx, cly)
+				clRect = FCRect(destRect.left - clx, destRect.top - cly, destRect.right - clx, destRect.bottom - cly)
 				paint.beginClip(clipRect)
+				paint.setClip(clRect)
 				if(m_paintCallBack != None):
 					m_paintCallBack(view, paint, rect)
 				paint.endClip(clipRect, destRect)
@@ -5944,6 +6115,7 @@ def renderViews(views, paint, rect):
 				if(subViewsSize > 0):
 					renderViews(subViews, paint, destRect)
 				paint.setOffset(clx, cly)
+				paint.setClip(clRect)
 				if(m_paintBorderCallBack != None):
 					m_paintBorderCallBack(view, paint, rect)
 			else:
@@ -5963,10 +6135,11 @@ def renderViews(views, paint, rect):
 			clipRect = FCRect(clx, cly, clx + view.m_size.cx, cly + view.m_size.cy)
 			destRect = FCRect(0, 0, 0, 0)
 			if(getIntersectRect(destRect, rect, clipRect) > 0):
-				paint.setOffset(0, 0)
 				view.m_clipRect = destRect
 				paint.setOffset(clx, cly)
+				clRect = FCRect(destRect.left - clx, destRect.top - cly, destRect.right - clx, destRect.bottom - cly)
 				paint.beginClip(clipRect)
+				paint.setClip(clRect)
 				if(m_paintCallBack != None):
 					m_paintCallBack(view, paint, rect)
 				paint.endClip(clipRect, destRect)
@@ -5975,6 +6148,7 @@ def renderViews(views, paint, rect):
 				if(subViewsSize > 0):
 					renderViews(subViews, paint, destRect)
 				paint.setOffset(clx, cly)
+				paint.setClip(clRect)
 				if(m_paintBorderCallBack != None):
 					m_paintBorderCallBack(view, paint, rect)
 			else:
@@ -5994,7 +6168,7 @@ def invalidate(paint):
 	rect = win32gui.GetClientRect(paint.m_hWnd)
 	paint.m_size = FCSize(rect[2] - rect[0], rect[3] - rect[1])
 	drawRect = FCRect(0, 0, (paint.m_size.cx / paint.m_scaleFactorX), (paint.m_size.cy / paint.m_scaleFactorY))
-	paint.beginPaint(drawRect)
+	paint.beginPaint(drawRect, drawRect)
 	renderViews(paint.m_views, paint, drawRect)
 	paint.endPaint()
 	win32gui.ReleaseDC(paint.m_hWnd, hDC)
@@ -6013,7 +6187,7 @@ def invalidateView(view, paint):
 		drawViews = paint.m_views
 		paint.m_clipRect = drawRect
 		allRect = FCRect(0, 0, (paint.m_size.cx / paint.m_scaleFactorX), (paint.m_size.cy / paint.m_scaleFactorY))
-		paint.beginPaint(allRect)
+		paint.beginPaint(allRect, drawRect)
 		renderViews(drawViews, paint, drawRect)
 		paint.endPaint()
 		win32gui.ReleaseDC(paint.m_hWnd, hDC)
@@ -6246,3 +6420,310 @@ def drawPie(pie, paint, clipRect):
 			paint.drawText(itemText, pie.m_textColor, pie.m_font, x3 - itemTextSize.cx / 2, y3 - itemTextSize.cy / 2)
 			startAngle += sweepAngle
 	paint.drawEllipse(pie.m_borderColor, 1, 0, eRect.left, eRect.top, eRect.right, eRect.bottom)
+
+#调用Gdi+的DLL
+class GdiPlusPaint(object):
+	def __init__(self):
+		self.m_gdiPlus = None #GDI+对象
+		self.m_gID = 0 #GDI+的编号
+	#初始化
+	def init(self):
+		self.m_gdiPlus = cdll.LoadLibrary(os.getcwd() + r"\\facecatcpp.dll")
+		cdll.argtypes = [c_char_p, c_int, c_float, c_double, c_long, c_wchar_p]
+	#创建GDI+
+	def createGdiPlus(self):
+		self.m_gID = self.m_gdiPlus.createGdiPlus()
+	#销毁GDI+
+	def deleteGdiPlus(self):
+		return self.m_gdiPlus.deleteGdiPlus(self.m_gID)
+    #添加曲线
+    #rect 矩形区域
+    #startAngle 从x轴到弧线的起始点沿顺时针方向度量的角（以度为单位）
+    #sweepAngle 从startAngle参数到弧线的结束点沿顺时针方向度量的角（以度为单位）
+	def addArc(self, left, top, right, bottom, startAngle, sweepAngle):
+		return self.m_gdiPlus.addArcGdiPlus(self.m_gID, left, top, right, bottom, startAngle, sweepAngle)
+	#添加贝赛尔曲线
+    #strApt 点阵字符串 x1,y1 x2,y2...
+	def addBezier(self, strApt):
+		return self.m_gdiPlus.addBezierGdiPlus(self.m_gID, c_char_p(strApt.encode('gbk')))
+	#添加曲线
+    #strApt 点阵字符串 x1,y1 x2,y2...
+	def addCurve(self, strApt):
+		return self.m_gdiPlus.addCurveGdiPlus(self.m_gID, c_char_p(strApt.encode('gbk')))
+	#添加椭圆
+    #rect 矩形
+	def addEllipse(self, left, top, right, bottom):
+		return self.m_gdiPlus.addEllipseGdiPlus(self.m_gID, left, top, right, bottom)
+	#添加直线
+    #x1 第一个点的横坐标
+    #y1 第一个点的纵坐标（以度为单位）
+    #x2 第二个点的横坐标
+    #y2 第二个点的纵坐标
+	def addLine(self, x1, y1, x2, y2):
+		return self.m_gdiPlus.addLineGdiPlus(self.m_gID, x1, y1, x2, y2)
+	#添加矩形
+    #rect 区域
+	def addRect(self, left, top, right, bottom):
+		return self.m_gdiPlus.addRectGdiPlus(self.m_gID, left, top, right, bottom)
+	#添加扇形
+    #rect 矩形区域
+    #startAngle 从x轴到弧线的起始点沿顺时针方向度量的角（以度为单位）
+    #sweepAngle 从startAngle参数到弧线的结束点沿顺时针方向度量的角（以度为单位）
+	def addPie(self, left, top, right, bottom, startAngle, sweepAngle):
+		return self.m_gdiPlus.addPieGdiPlus(self.m_gID, left, top, right, bottom, startAngle, sweepAngle)
+    #添加文字
+    #text 文字
+    #font 字体
+    #rect 区域
+	def addText(self, text, font, left, top, right, bottom, width):
+		return self.m_gdiPlus.addTextGdiPlus(self.m_gID, c_char_p(text.encode('gbk')), c_char_p(font.encode('gbk')), left, top, right, bottom, width)
+	#开始导出
+    #exportPath  路径
+    #rect 区域
+	def beginExport(self, exportPath, left, top, right, bottom):
+		return self.m_gdiPlus.beginExportGdiPlus(self.m_gID, c_char_p(exportPath.encode('gbk')), left, top, right, bottom)
+	#开始绘图
+	#hdc HDC
+	#wRect 窗体区域
+	#pRect 刷新区域
+	def beginPaint(self, hDC, wLeft, wTop, wRight, wBottom, pLeft, pTop, pRight, pBottom):
+		return self.m_gdiPlus.beginPaintGdiPlus(self.m_gID, hDC, c_int(wLeft), c_int(wTop), c_int(wRight), c_int(wBottom), c_int(pLeft), c_int(pTop), c_int(pRight), c_int(pBottom))
+	#开始一段路径
+	def beginPath(self):
+		return self.m_gdiPlus.beginPathGdiPlus(self.m_gID)
+	#裁剪路径
+	def clipPath(self):
+		return self.m_gdiPlus.clipPathGdiPlus(self.m_gID)
+	#清除缓存
+	def clearCaches(self):
+		return self.m_gdiPlus.clearCachesGdiPlus(self.m_gID)
+	#闭合路径
+	def closeFigure(self):
+		return self.m_gdiPlus.closeFigureGdiPlus(self.m_gID)
+	#结束一段路径
+	def closePath(self):
+		return self.m_gdiPlus.closePathGdiPlus(self.m_gID)
+	#绘制弧线
+    #dwPenColor 颜色
+    #width 宽度
+    #style 样式
+    #rect 矩形区域
+    #startAngle 从x轴到弧线的起始点沿顺时针方向度量的角（以度为单位）
+    #sweepAngle 从startAngle参数到弧线的结束点沿顺时针方向度量的角（以度为单位）
+	def drawArc(self, dwPenColor, width, style, left, top, right, bottom, startAngle, sweepAngle):
+		return self.m_gdiPlus.drawArcGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0), c_int(left), c_int(top), c_int(right), c_int(bottom), c_float(startAngle), c_float(sweepAngle))
+	#设置贝赛尔曲线
+    #dwPenColor 颜色
+    #width 宽度
+    #style 样式
+    #strApt 点阵字符串 x1,y1 x2,y2...
+	def drawBezier(self, dwPenColor, width, style, strApt):
+		return self.m_gdiPlus.drawBezierGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0), c_char_p(strApt.encode('gbk')))
+	#绘制曲线
+    #dwPenColor 颜色
+    #width 宽度
+    #style 样式
+    #strApt 点阵字符串 x1,y1 x2,y2...
+	def drawCurve(self, dwPenColor, width, style, strApt):
+		return self.m_gdiPlus.drawCurveGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0), c_char_p(strApt.encode('gbk')))
+	#绘制椭圆
+    #dwPenColor 颜色
+    #width 宽度
+    # style 样式
+    #left 左侧坐标
+    #top 顶部左标
+    #right 右侧坐标
+    #bottom 底部坐标
+	def drawEllipse(self, dwPenColor, width, style, left, top, right, bottom):
+		return self.m_gdiPlus.drawEllipseGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0), c_int(left), c_int(top), c_int(right), c_int(bottom))
+	#绘制图片
+    #imagePath 图片路径
+    #rect 绘制区域
+	def drawImage(self, imagePath, left, top, right, bottom):
+		return self.m_gdiPlus.drawImageGdiPlus(self.m_gID, c_char_p(imagePath.encode('gbk')), c_int(left), c_int(top), c_int(right), c_int(bottom))
+	#绘制直线
+    #dwPenColor 颜色
+    #width 宽度
+    #style 样式
+    #x1 第一个点的横坐标
+    #y1 第一个点的纵坐标
+    #x2 第二个点的横坐标
+    #y2 第二个点的纵坐标
+	def drawLine(self, dwPenColor, width, style, x1, y1, x2, y2):
+		return self.m_gdiPlus.drawLineGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0), c_int(x1), c_int(y1), c_int(x2), c_int(y2))
+	#绘制直线
+    #dwPenColor 颜色
+    #width 宽度
+    #style 样式
+	def drawPath(self, dwPenColor, width, style):
+		return self.m_gdiPlus.drawPathGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0))
+	#绘制扇形
+    #dwPenColor 颜色
+    #width 宽度
+    #style 样式
+    #rect 矩形区域
+    #startAngle 从x轴到弧线的起始点沿顺时针方向度量的角（以度为单位）
+    #sweepAngle 从startAngle参数到弧线的结束点沿顺时针方向度量的角（以度为单位）
+	def drawPie(self, dwPenColor, width, style, left, top, right, bottom, startAngle, sweepAngle):
+		return self.m_gdiPlus.drawPieGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0), c_int(left), c_int(top), c_int(right), c_int(bottom), c_float(startAngle), c_float(sweepAngle))
+	#绘制多边形
+    #dwPenColor 颜色
+    #width 宽度
+    #style 样式
+    #strApt 点阵字符串 x1,y1 x2,y2...
+	def drawPolygon(self, dwPenColor, width, style, strApt):
+		return self.m_gdiPlus.drawPolygonGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0), c_char_p(strApt.encode('gbk')))
+	#绘制大量直线
+    #dwPenColor 颜色
+    #width 宽度
+    #style 样式
+    #strApt 点阵字符串 x1,y1 x2,y2...
+	def drawPolyline(self, dwPenColor, width, style, strApt):
+		return self.m_gdiPlus.drawPolylineGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0), c_char_p(strApt.encode('gbk')))
+	#绘制矩形
+    #dwPenColor 颜色
+    #width 宽度
+    #style 样式
+    #rect 矩形区域
+	def drawRect(self, dwPenColor, width, style, left, top, right, bottom):
+		return self.m_gdiPlus.drawRectGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0), c_int(left), c_int(top), c_int(right), c_int(bottom))
+	#绘制圆角矩形
+    #dwPenColor 颜色
+    #width 宽度
+    #style 样式
+    #rect 矩形区域
+    #cornerRadius 边角半径
+	def drawRoundRect(self, dwPenColor, width, style, left, top, right, bottom, cornerRadius):
+		return self.m_gdiPlus.drawRoundRectGdiPlus(self.m_gID, dwPenColor, c_float(width), c_int(0), c_int(left), c_int(top), c_int(right), c_int(bottom), c_int(cornerRadius))
+	#绘制文字
+    #text 文字
+    #dwPenColor 颜色
+    #font 字体
+    #rect 矩形区域
+	def drawText(self, strText, dwPenColor, font, left, top, right, bottom, width):
+		return self.m_gdiPlus.drawTextGdiPlus(self.m_gID, c_char_p(strText.encode('gbk')), dwPenColor, c_char_p(font.encode('gbk')), c_int(left), c_int(top), c_int(right), c_int(bottom))
+	#绘制文字
+    #text 文字
+    #dwPenColor 颜色
+    #font 字体
+    #rect 矩形区域
+	def drawTextWithPos(self, strText, dwPenColor, font, x, y):
+		return self.m_gdiPlus.drawTextWithPosGdiPlus(self.m_gID, c_char_p(strText.encode('gbk')), dwPenColor, c_char_p(font.encode('gbk')), c_int(x), c_int(y))
+	#绘制自动省略结尾的文字
+    #text 文字
+    #dwPenColor 颜色
+    #font 字体
+    #rect 矩形区域
+	def drawTextAutoEllipsis(self, strText, dwPenColor, font, left, top, right, bottom):
+		return self.m_gdiPlus.drawTextAutoEllipsisGdiPlus(self.m_gID, c_char_p(strText.encode('gbk')), dwPenColor, c_char_p(font.encode('gbk')), c_int(left), c_int(top), c_int(right), c_int(bottom))
+	#结束导出
+	def endExport(self):
+		return self.m_gdiPlus.endExportGdiPlus(self.m_gID)
+	#结束绘图
+	def endPaint(self):
+		return self.m_gdiPlus.endPaintGdiPlus(self.m_gID)
+	#反裁剪路径
+	def excludeClipPath(self):
+		return self.m_gdiPlus.excludeClipPathGdiPlus(self.m_gID)
+	#填充椭圆
+    #dwPenColor 颜色
+    #rect 矩形区域
+	def fillEllipse(self, dwPenColor, left, top, right, bottom):
+		return self.m_gdiPlus.fillEllipseGdiPlus(self.m_gID, dwPenColor, c_int(left), c_int(top), c_int(right), c_int(bottom))
+	#绘制渐变椭圆
+    #dwFirst 开始颜色
+    #dwSecond  结束颜色
+    #rect 矩形区域
+    #angle 角度
+	def fillGradientEllipse(self, dwFirst, dwSecond, left, top, right, bottom, angle):
+		return self.m_gdiPlus.fillGradientEllipseGdiPlus(self.m_gID, dwFirst, dwSecond, c_int(left), c_int(top), c_int(right), c_int(bottom), c_int(angle))
+	#填充渐变路径
+    #dwFirst 开始颜色
+    #dwSecond  结束颜色
+    #rect 矩形区域
+    #angle 角度
+	def fillGradientPath(self, dwFirst, dwSecond, left, top, right, bottom, angle):
+		return self.m_gdiPlus.fillGradientPathGdiPlus(self.m_gID, dwFirst, dwSecond, c_int(left), c_int(top), c_int(right), c_int(bottom), c_int(angle))
+	#绘制渐变的多边形
+    #dwFirst 开始颜色
+    #dwSecond  开始颜色
+    #strApt 点阵字符串 x1,y1 x2,y2...
+    #angle 角度
+	def fillGradientPolygon(self, dwFirst, dwSecond, strApt, angle):
+		return self.m_gdiPlus.fillGradientPolygonGdiPlus(self.m_gID, dwFirst, dwSecond, c_char_p(strApt.encode('gbk')), c_int(angle))
+	#绘制渐变矩形
+    #dwFirst 开始颜色
+    #dwSecond 开始颜色
+    #rect 矩形
+    #cornerRadius 边角半径
+    #angle 角度
+	def fillGradientRect(self, dwFirst, dwSecond, left, top, right, bottom, cornerRadius, angle):
+		return self.m_gdiPlus.fillGradientRectGdiPlus(self.m_gID, dwFirst, dwSecond, c_int(left), c_int(top), c_int(right), c_int(bottom), c_int(cornerRadius), c_int(angle))
+	#填充路径
+    #dwPenColor 颜色
+	def fillPath(self, dwPenColor):
+		return self.m_gdiPlus.fillPathGdiPlus(self.m_gID, dwPenColor)
+	#绘制扇形
+    #dwPenColor 颜色
+    #rect 矩形区域
+    #startAngle 从x轴到弧线的起始点沿顺时针方向度量的角（以度为单位）
+    #sweepAngle 从startAngle参数到弧线的结束点沿顺时针方向度量的角（以度为单位）
+	def fillPie(self, dwPenColor, left, top, right, bottom, startAngle, sweepAngle):
+		return self.m_gdiPlus.fillPieGdiPlus(self.m_gID, dwPenColor, c_int(left), c_int(top), c_int(right), c_int(bottom), c_float(startAngle), c_float(sweepAngle))
+	#填充多边形
+    #dwPenColor 颜色
+    #strApt 点阵字符串 x1,y1 x2,y2...
+	def fillPolygon(self, dwPenColor, strApt):
+		return self.m_gdiPlus.fillPolygonGdiPlus(self.m_gID, dwPenColor, c_char_p(strApt.encode('gbk')))
+	#填充矩形
+    #dwPenColor 颜色
+    #left 左侧坐标
+    #top 顶部左标
+    #right 右侧坐标
+    #bottom 底部坐标
+	def fillRect(self, dwPenColor, left, top, right, bottom):
+		return self.m_gdiPlus.fillRectGdiPlus(self.m_gID, dwPenColor, c_int(left), c_int(top), c_int(right), c_int(bottom))
+	#填充圆角矩形
+    #dwPenColor 颜色
+    #rect 矩形区域
+    #cornerRadius 边角半径
+	def fillRoundRect(self, dwPenColor, left, top, right, bottom, cornerRadius):
+		return self.m_gdiPlus.fillRoundRectGdiPlus(self.m_gID, dwPenColor, c_int(left), c_int(top), c_int(right), c_int(bottom), c_int(cornerRadius))
+	#设置裁剪区域
+    #rect 区域
+	def setClip(self, left, top, right, bottom):
+		return self.m_gdiPlus.setClipGdiPlus(self.m_gID, c_int(left), c_int(top), c_int(right), c_int(bottom))
+	#设置直线两端的样式
+    #startLineCap 开始的样式
+    #endLineCap  结束的样式
+	def setLineCap(self, startLineCap, endLineCap):
+		return self.m_gdiPlus.setLineCapGdiPlus(self.m_gID, c_int(startLineCap), c_int(endLineCap))
+	#设置偏移
+    #mp 偏移坐标
+	def setOffset(self, offsetX, offsetY):
+		return self.m_gdiPlus.setOffsetGdiPlus(self.m_gID, c_int(offsetX), c_int(offsetY))
+	#设置透明度
+    #opacity 透明度
+	def setOpacity(self, opacity):
+		return self.m_gdiPlus.setOpacityGdiPlus(self.m_gID, c_float(opacity))
+	#设置资源的路径
+    #resourcePath 资源的路径
+	def setResourcePath(self, resourcePath):
+		return self.m_gdiPlus.setResourcePathGdiPlus(self.m_gID, c_char_p(resourcePath.encode('gbk')))
+	#设置旋转角度
+    #rotateAngle 旋转角度
+	def setRotateAngle(self, rotateAngle):
+		return self.m_gdiPlus.setRotateAngleGdiPlus(self.m_gID, c_int(rotateAngle))
+	#设置缩放因子
+    #scaleFactorX 横向因子
+    #scaleFactorY 纵向因子
+	def setScaleFactor(self, scaleFactorX, scaleFactorY):
+		return self.m_gdiPlus.setScaleFactorGdiPlus(self.m_gID, c_double(scaleFactorX), c_double(scaleFactorY))
+	#获取文字大小
+    #text 文字
+    #font 字体
+	#width 字符最大宽度
+	#data 返回数据 create_string_buffer(1024000) cx,cy
+	def textSize(self, strText, font, width, data):
+		return self.m_gdiPlus.textSizeGdiPlus(self.m_gID, c_char_p(strText.encode('gbk')), c_char_p(font.encode('gbk')), c_int(width), data)
+
