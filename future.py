@@ -274,11 +274,27 @@ def readXmlNode(paint, node, parent):
 									gridColumn.m_borderColor = "rgb(150,150,150)"
 									gridColumn.m_textColor = "rgb(0,0,0)"
 			elif(view.m_type == "textbox"):
-				view.m_hWnd = win32gui.CreateWindowEx(0, "Edit", view.m_name, WS_VISIBLE|WS_CHILD|SS_CENTERIMAGE, 0, 0, 100, 30, paint.m_hWnd, 0, 0, None)
-				win32gui.ShowWindow(view.m_hWnd, SW_HIDE)
-				s = win32gui.GetWindowLong(view.m_hWnd, GWL_EXSTYLE)
-				win32gui.SetWindowLong(view.m_hWnd, GWL_EXSTYLE, s|ES_CENTER)
-				setHWndText(view.m_hWnd, view.m_text)
+				if(paint.m_useGdiPlus and len(view.m_name) > 0):
+					paint.init()
+					paint.m_gdiPlusPaint.createView("textbox", view.m_name)
+					if(view.m_paint.m_defaultUIStyle == "dark"):
+						paint.m_gdiPlusPaint.setAttribute(view.m_name, "backcolor", "rgb(0,0,0)")
+						paint.m_gdiPlusPaint.setAttribute(view.m_name, "bordercolor", "rgb(100,100,100)")
+						paint.m_gdiPlusPaint.setAttribute(view.m_name, "textcolor", "rgb(255,255,255)")
+					elif(view.m_paint.m_defaultUIStyle == "light"):
+						paint.m_gdiPlusPaint.setAttribute(view.m_name, "backcolor", "rgb(255,255,255)")
+						paint.m_gdiPlusPaint.setAttribute(view.m_name, "bordercolor", "rgb(150,150,150)")
+						paint.m_gdiPlusPaint.setAttribute(view.m_name, "textcolor", "rgb(0,0,0)")
+					for key in child.attrib:
+						name = key.lower()
+						value = child.attrib[key]
+						paint.m_gdiPlusPaint.setAttribute(view.m_name, name, value)
+				else:
+					view.m_hWnd = win32gui.CreateWindowEx(0, "Edit", view.m_name, WS_VISIBLE|WS_CHILD|SS_CENTERIMAGE, 0, 0, 100, 30, paint.m_hWnd, 0, 0, None)
+					win32gui.ShowWindow(view.m_hWnd, SW_HIDE)
+					s = win32gui.GetWindowLong(view.m_hWnd, GWL_EXSTYLE)
+					win32gui.SetWindowLong(view.m_hWnd, GWL_EXSTYLE, s|ES_CENTER)
+					setViewText(view, view.m_text)
 			elif(view.m_type == "combobox"):
 				#https://blog.csdn.net/qq_31178679/article/details/125883494
 				view.m_hWnd = win32gui.CreateWindowEx(0, "ComboBox", view.m_name, WS_VISIBLE | WS_CHILD | WS_BORDER | CBS_HASSTRINGS | CBS_DROPDOWNLIST, 0, 0, 100, 30, paint.m_hWnd, 0, 0, None)
@@ -320,6 +336,9 @@ def onViewPaint(view, paint, drawRect):
 			paint.drawText(view.m_text, view.m_textColor, view.m_font, 0, (view.m_size.cy - tSize.cy) / 2)
 	elif(view.m_type == "div" or view.m_type =="tabpage" or view.m_type =="tabview" or view.m_type =="layout"):
 		drawDiv(view, paint, drawRect)
+	elif(view.m_type == "textbox"):
+		if(paint.m_useGdiPlus):
+			paint.m_gdiPlusPaint.paintView(view.m_name, 0, 0, view.m_size.cx, view.m_size.cy)
 	else:
 		drawButton(view, paint, drawRect)
 
@@ -453,6 +472,25 @@ def onViewMouseUp(view, mp, buttons, clicks, delta):
 	elif(view.m_type == "button"):
 		invalidateView(view, view.m_paint)
 
+#获取视图文本
+#view 视图
+def getViewText(view):
+	viewText = ""
+	if(view.m_paint.m_useGdiPlus):
+		recvData = create_string_buffer(102400)
+		view.m_paint.m_gdiPlusPaint.getAttribute(view.m_name, "text", recvData)
+		viewText = str(recvData.value, encoding="gbk")
+	else:
+		viewText = getHWndText(view.m_hWnd)
+	return viewText
+
+#设置视图文本
+def setViewText(view, text):
+	if(view.m_paint.m_useGdiPlus):
+		view.m_paint.m_gdiPlusPaint.setAttribute(view.m_name, "text", text)
+	else:
+		setHWndText(view.m_hWnd, text)
+
 #视图的鼠标点击方法
 #view 视图
 #mp 坐标
@@ -486,11 +524,11 @@ def onViewClick(view, mp, buttons, clicks, delta):
 		rbOpen = findViewByName("rbOpen", m_paint.m_views)
 		rbCloseToday = findViewByName("rbCloseToday", m_paint.m_views)
 		rbClose = findViewByName("rbClose", m_paint.m_views)
-		issueCode = getHWndText(txtIssueCode.m_hWnd)
+		issueCode = getViewText(txtIssueCode)
 		if(issueCode in m_allCodes):
 			exchangeID = m_allCodes[issueCode].exchangeID
-			volume = int(getHWndText(spinVolume.m_hWnd))
-			price = float(getHWndText(spinPrice.m_hWnd))
+			volume = int(getViewText(spinVolume))
+			price = float(getViewText(spinPrice))
 			if(rbBuy.m_checked):
 				if(rbOpen.m_checked):
 					ctp.bidOpen(ctp.generateReqID(), issueCode, exchangeID, price, volume, 51, "")
@@ -1141,9 +1179,9 @@ def onClickGridCell(grid, row, gridColumn, cell, firstTouch, secondTouch, firstP
 		txtIssueCode = findViewByName("txtIssueCode", m_paint.m_views)
 		spinPrice = findViewByName("spinPrice", m_paint.m_views)
 		spinVolume = findViewByName("spinVolume", m_paint.m_views)
-		setHWndText(txtIssueCode.m_hWnd, code)
-		setHWndText(spinPrice.m_hWnd, price)
-		setHWndText(spinVolume.m_hWnd, "1")
+		setViewText(txtIssueCode, code)
+		setViewText(spinPrice, price)
+		setViewText(spinVolume, "1")
 		invalidate(m_paint)
 	elif(gridName == "gridInvestorPosition"):
 		code = row.m_cells[0].m_value
@@ -1153,9 +1191,9 @@ def onClickGridCell(grid, row, gridColumn, cell, firstTouch, secondTouch, firstP
 		txtIssueCode = findViewByName("txtIssueCode", m_paint.m_views)
 		spinPrice = findViewByName("spinPrice", m_paint.m_views)
 		spinVolume = findViewByName("spinVolume", m_paint.m_views)
-		setHWndText(txtIssueCode.m_hWnd, code)
-		setHWndText(spinPrice.m_hWnd, price)
-		setHWndText(spinVolume.m_hWnd, "1")
+		setViewText(txtIssueCode, code)
+		setViewText(spinPrice, price)
+		setViewText(spinVolume, "1")
 		invalidate(m_paint)
 	elif(gridName == "gridInvestorPositionDetail"):
 		code = row.m_cells[1].m_value
@@ -1165,9 +1203,9 @@ def onClickGridCell(grid, row, gridColumn, cell, firstTouch, secondTouch, firstP
 		txtIssueCode = findViewByName("txtIssueCode", m_paint.m_views)
 		spinPrice = findViewByName("spinPrice", m_paint.m_views)
 		spinVolume = findViewByName("spinVolume", m_paint.m_views)
-		setHWndText(txtIssueCode.m_hWnd, code)
-		setHWndText(spinPrice.m_hWnd, price)
-		setHWndText(spinVolume.m_hWnd, "1")
+		setViewText(txtIssueCode, code)
+		setViewText(spinPrice, price)
+		setViewText(spinVolume, "1")
 		invalidate(m_paint)
 
 m_paint = FCPaint() #创建绘图对象
@@ -1203,6 +1241,11 @@ def WndProc(hwnd,msg,wParam,lParam):
 			ccx, ccy = win32gui.ScreenToClient(hwnd, (mx, my))
 			mp = FCPoint(ccx, ccy)
 			onMouseDown(mp, 1, 1, 0, m_paint)
+		elif msg == WM_LBUTTONDBLCLK:
+			mx, my = win32api.GetCursorPos()
+			ccx, ccy = win32gui.ScreenToClient(hwnd, (mx, my))
+			mp = FCPoint(ccx, ccy)
+			onMouseDown(mp, 1, 2, 0, m_paint)
 		elif msg == WM_LBUTTONUP:
 			mx, my = win32api.GetCursorPos()
 			ccx, ccy = win32gui.ScreenToClient(hwnd, (mx, my))
@@ -1234,6 +1277,14 @@ def WndProc(hwnd,msg,wParam,lParam):
 					view.m_size = FCSize(m_paint.m_size.cx, m_paint.m_size.cy)
 			updateView(m_paint.m_views)
 			invalidate(m_paint)
+		elif msg == WM_IME_COMPOSITION or msg == WM_IME_CHAR or msg == WM_IME_SETCONTEXT:
+			if(m_paint.m_useGdiPlus):
+				m_paint.m_gdiPlusPaint.onMessage(hwnd,msg,wParam,lParam)
+		elif msg == WM_CHAR or msg == WM_KEYDOWN or msg == WM_SYSKEYDOWN or msg == WM_KEYUP or msg == WM_SYSKEYUP:
+			if(facecat.m_focusedView != None and facecat.m_focusedView.m_type == "textbox"):
+				if(m_paint.m_useGdiPlus):
+					m_paint.m_gdiPlusPaint.onMessage(hwnd,msg,wParam,lParam)
+					invalidateView(facecat.m_focusedView, facecat.m_focusedView.m_paint)
 	return win32gui.DefWindowProc(hwnd,msg,wParam,lParam)
 	
 #创建窗体
@@ -1242,6 +1293,7 @@ wc.hbrBackground = COLOR_BTNFACE + 1
 wc.hCursor = win32gui.LoadCursor(0,IDI_APPLICATION)
 wc.lpszClassName = "facecat-py"
 wc.lpfnWndProc = WndProc
+wc.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS
 reg = win32gui.RegisterClass(wc)
 hwnd = win32gui.CreateWindow(reg,'facecat-py',WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,CW_USEDEFAULT,0,0,0,None)
 m_paint.m_hWnd = hwnd
