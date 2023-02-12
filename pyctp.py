@@ -1119,7 +1119,9 @@ class CTPDLL(object):
 		self.m_ctpID = 0 #CTP的编号
 	#初始化
 	def init(self):
-		self.m_ctp = cdll.LoadLibrary(os.getcwd() + r"\\iCTP.dll")
+		current_file_path = __file__
+		current_file_dir = os.path.dirname(current_file_path)
+		self.m_ctp = cdll.LoadLibrary(current_file_dir + r"\\iCTP.dll")
 		cdll.argtypes = [c_char_p, c_int, c_double, c_long, c_wchar_p]
 	#卖平：多单平仓
 	#requestID 请求ID c_int
